@@ -1,7 +1,6 @@
 from collections import deque
 from dataclasses import dataclass
 from copy import copy
-from messages import *
 
 class Process():
     def __init__(self):
@@ -37,20 +36,31 @@ class Process():
 
         if not self.blocked: 
             # Update system so msg is in [ts, ts+L]
-            self.propagate_to(msg.timestamp)
+            prop_time = self.get_propagation_time()
+            self.propagate_to(prop_time)
 
-            # perform action now that it's between [ts, ts+L]
-            msg.open()
+            if prop_time == msg.timestamp:
+                # perform action now that it's between [ts, ts+L]
+                msg.open()
 
-            # Respond to any messages
-            self.notify()
+                # Respond to any messages
+                self.notify()
+
+    def get_propagation_time(self, msg):
+        prop_time = msg.timestamp
+        for p in self.output_processes:
+            if p.get_next_timestamp() < prop_time:
+                prop_time = p.get_next_timestamp()
+
+        return prop_time
 
     def propagate_to(self, t):
-        while t > self.get_timestamp():
+        while self.get_timestamp() < t:
             self.evolve()
             self.increment_time()
             for process in self.output_processes:
-               OutputMessage(self, process)
+                if self.get_timestamp() <= process.get_timestamp() and self.get_next_timestamp() > process.get_timestamp()
+                    OutputMessage(self, process)
 
             self.notify()
 
@@ -99,7 +109,6 @@ class Process():
             self.minor_tick = 0
             self.major_tick += 1
 
-
     ## Protected ##
 
     def receive_message(self, message):
@@ -139,6 +148,9 @@ class Process():
     def get_timestamp(self):
         return self.minor_tick / self.frequency + self.major_tick
     
+    def get_next_timestamp(self):
+        return (self.minor_tick + 1) / self.frequency + self.major_tick 
+
     def get_output(self, timestamp):
         return self.output
 
