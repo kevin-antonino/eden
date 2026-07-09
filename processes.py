@@ -1,6 +1,7 @@
 from collections import deque
 from dataclasses import dataclass
 from copy import copy
+from messages import *
 
 class Process():
     def __init__(self):
@@ -33,15 +34,15 @@ class Process():
 
         if not self.blocked: 
             # Update system so msg is in [ts, ts+L]
-            prop_time = self.get_propagation_time()
+            prop_time = self.get_propagation_time(msg)
             self.propagate_to(prop_time)
 
-            if prop_time == msg.timestamp:
+            if abs(prop_time - msg.timestamp) < 0.0001:
                 # perform action now that it's between [ts, ts+L]
                 msg.open()
 
-                # Respond to any messages
-                self.notify()
+            # Respond to any messages
+            self.notify()
 
     def get_propagation_time(self, msg):
         prop_time = msg.timestamp
@@ -56,7 +57,7 @@ class Process():
             self.evolve()
             self.increment_time()
             for process in self.output_processes:
-                if self.get_timestamp() <= process.get_timestamp() and self.get_next_timestamp() > process.get_timestamp()
+                if self.get_timestamp() <= process.get_next_timestamp() and self.get_next_timestamp() > process.get_next_timestamp():
                     OutputMessage(self, process)
 
             self.notify()
@@ -213,7 +214,7 @@ class Simulation():
 
         # Needs a queue that gets smaller. if just controller, end the sim.    
         queue = self.controller.get_queue()
-        while queue
+        while len(queue) > 1:
             for process in queue:
                 process.execute()
 
