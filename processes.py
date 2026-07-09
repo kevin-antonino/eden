@@ -8,10 +8,6 @@ class Process():
 
         ## I/O ##
         self.output = 0
-
-        ## Status ##
-        self.blocked = True
-        self.complete = False # do away with this
         
         ## Timekeeping ##
         self.t0 = 0
@@ -26,6 +22,7 @@ class Process():
         self.output_processes = set() # Set of subscribers to be notified when this process evolves
 
         ## Deadlock Detection
+        self.blocked = True
         self.engaged = False
         self.count = 0  # Number of messages sent without a signal received
         self.parent = None
@@ -126,7 +123,6 @@ class Process():
         print(f'{self.name}: signal recieved')
 
     def finish(self):
-        self.complete = True
         for pr in self.outbox.keys():
             SimulationComplete(self, pr)
 
@@ -216,8 +212,10 @@ class Simulation():
         self.controller.initialize()
 
         # Needs a queue that gets smaller. if just controller, end the sim.    
-        while not self.controller.complete:
-            queue = self.controller.get_queue()
+        queue = self.controller.get_queue()
+        while queue
             for process in queue:
                 process.execute()
+
+            queue = self.controller.get_queue()
 
