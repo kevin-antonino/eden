@@ -3,9 +3,70 @@ from dataclasses import dataclass
 from copy import copy
 from messages import *
 
-class Process():
+class Process(ABC):
     def __init__(self):
         self.name = ''
+        
+        ## Communication ## 
+        self.inbox = {}       # Process : Message Queue pairs that this process will wait for
+        self.outbox = {}      # Process : Message Queue pairs that will wait for this process
+
+        ## Deadlock Detection
+        self.blocked = True
+        self.engaged = False
+        self.count = 0  # Number of messages sent without a signal received
+        self.parent = None
+
+    @abstractmethod
+    def initialize(self):
+        pass
+
+    @abstractmethod
+    def execute(self):
+        pass
+
+    def receive_message(self, message):
+        # Error if process is not in list
+        self.inbox[message.sender].append(message)
+        if self.engaged:
+            print(f'{self.name}: Already engaged. Signalling...')
+            message.sender.signal()
+        else:
+            self.engaged = True
+            self.parent = message.sender
+
+    def signal(self):
+        self.count = 0
+        print(f'{self.name}: signal recieved')
+
+    def finish(self):
+        for pr in self.outbox.keys():
+            SimulationComplete(self, pr)
+
+    def link_to(self, p):
+        print(f'{self.name} is now linked to {p.name}')
+        self.inbox[p] = deque()
+        p.outbox[self] = deque()
+
+    def add_to_outbox(self, msg: Message):
+        self.outbox[msg.receiver].append(msg)
+
+    def notify(self):
+        #print(f'{self.name} notifying ...')
+        for pr in self.outbox.keys():
+            while self.outbox[pr]:
+                msg = self.outbox[pr].popleft()
+                msg.send()
+
+    def get_timestamp(self):
+        return 0
+
+    def get_next_timestamp(self):
+        return float('inf')
+
+class PhysicalProcess(Process):
+    def __init__(self):
+        super().__init__()
 
         ## I/O ##
         self.output = 0
@@ -18,15 +79,7 @@ class Process():
         self.major_tick = 0
 
         ## Communication ## 
-        self.inbox = {}       # Process : Message Queue pairs that this process will wait for
-        self.outbox = {}      # Process : Message Queue pairs that will wait for this process
         self.output_processes = set() # Set of subscribers to be notified when this process evolves
-
-        ## Deadlock Detection
-        self.blocked = True
-        self.engaged = False
-        self.count = 0  # Number of messages sent without a signal received
-        self.parent = None
 
     def execute(self):
         # Get Earliest Message 
@@ -41,8 +94,8 @@ class Process():
                 # perform action now that it's between [ts, ts+L]
                 msg.open()
 
-            # Respond to any messages
-            self.notify()
+                # Respond to any messages
+                self.notify()
 
     def get_propagation_time(self, msg):
         prop_time = msg.timestamp
@@ -84,19 +137,9 @@ class Process():
 
         return earliest_msg
 
-    def add_to_outbox(self, msg: Message):
-        self.outbox[msg.receiver].append(msg)
-
     def evolve(self):
         # Update internal state by dt
         print(f'{self.name}: Evolving from {self.get_timestamp()} to {self.get_timestamp() + 1/self.frequency}')
-
-    def notify(self):
-        #print(f'{self.name} notifying ...')
-        for pr in self.outbox.keys():
-            while self.outbox[pr]:
-                msg = self.outbox[pr].popleft()
-                msg.send()
 
     def pull(self, output):
         return
@@ -107,30 +150,6 @@ class Process():
             self.minor_tick = 0
             self.major_tick += 1
 
-    ## Protected ##
-
-    def receive_message(self, message):
-        # Error if process is not in list
-        self.inbox[message.sender].append(message)
-        if self.engaged:
-            print(f'{self.name}: Already engaged. Signalling...')
-            message.sender.signal()
-        else:
-            self.engaged = True
-            self.parent = message.sender
-
-    def signal(self):
-        self.count = 0
-        print(f'{self.name}: signal recieved')
-
-    def finish(self):
-        for pr in self.outbox.keys():
-            SimulationComplete(self, pr)
-
-    def link_to(self, p):
-        print(f'{self.name} is now linked to {p.name}')
-        self.inbox[p] = deque()
-        p.outbox[self] = deque()
 
     def initialize(self):
         print(f'{self.name} is initializing...')
@@ -174,7 +193,7 @@ class Controller(Process):
             return
 
         # check for deadlock
-        if self.count == 0: 
+        if self.count == float('inf'): 
             # Execute deadlock protocall
             print(f'Deadlock Detected!')
             earliest_time = float('inf')
@@ -212,7 +231,6 @@ class Simulation():
     def start(self):
         self.controller.initialize()
 
-        # Needs a queue that gets smaller. if just controller, end the sim.    
         queue = self.controller.get_queue()
         while len(queue) > 1:
             for process in queue:
