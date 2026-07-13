@@ -6,7 +6,6 @@ class Message(ABC):
         self.sender : Process       = sender
         self.receiver : Process     = receiver
         self.timestamp : float      = sender.get_timestamp()
-        self.sender.add_to_outbox(self)
 
     def send(self) -> None:
         print(f'{self.sender.name}: Sending message to {self.receiver.name} at {self.timestamp}')
@@ -60,7 +59,8 @@ class Begin(Message):
     def read(self):
         print(f'{self.receiver.name}: Opened Begin message. Starting at {self.receiver.get_timestamp()}')
         self.receiver.initialize()
-        InitializationComplete(self.receiver, self.sender)    
+        msg = InitializationComplete(self.receiver, self.sender)    
+        self.receiver.add_to_outbox(msg)
 
 class Terminate(Message):
     def __init__(self, sender: Controller, receiver: Process) -> None:
@@ -76,7 +76,8 @@ class InitializationComplete(Message):
         super().__init__(sender, receiver)
 
     def read(self):
-        Terminate(self.receiver, self.sender)
+        msg = Terminate(self.receiver, self.sender)
+        self.receiver.add_to_outbox(msg)
 
 class SimulationComplete(Message):
     def __init__(self, sender: Process, receiver: Process) -> None:

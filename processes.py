@@ -3,16 +3,17 @@ from copy import copy
 from messages import *
 
 class Process(ABC):
+    TIME_TOL = 0.001
     def __init__(self):
         self.name = ''
         
         ## Communication ## 
-        self.inbox = {}       # Process : Message Queue pairs that this process will wait for
-        self.outbox = {}      # Process : Message Queue pairs that will wait for this process
+        self.inbox: dict[Process, deque[Message]] = {} 
+        self.outbox: dict[Process, deque[Message]] = {} 
         self.next_causal_msg = NullMessage()
 
         ## Deadlock Detection
-        self.blocked = True
+        self.blocked = True     # Make an enum?
         self.engaged = False
         self.count = 0  # Number of messages sent without a signal received
         self.parent = None
@@ -56,7 +57,8 @@ class Process(ABC):
 
     def finish(self):
         for pr in self.outbox.keys():
-            SimulationComplete(self, pr)
+            msg = SimulationComplete(self, pr)
+            self.add_to_outbox(msg)
 
     def link_to(self, p):
         print(f'{self.name} is now linked to {p.name}')
@@ -119,10 +121,11 @@ class PhysicalProcess(Process):
                 for process in self.output_processes:
                     if self.get_timestamp() <= process.get_next_timestamp() and \
                         self.get_next_timestamp() > process.get_next_timestamp():
-                        OutputMessage(self, process)
+                        msg = OutputMessage(self, process)
+                        self.add_to_outbox(msg)
             
             # if close to next message, read it
-            if abs(prop_time - self.next_causal_msg.timestamp) < 0.0001:
+            if abs(prop_time - self.next_causal_msg.timestamp) < self.TIME_TOL:
                 self.next_causal_msg.open()
                 self.check_inbox()
             
@@ -210,7 +213,8 @@ class Controller(Process):
     def initialize(self):
         print(f'{self.name}: is initializing...')
         for process in self.outbox.keys():
-            Begin(self, process)
+            msg = Begin(self, process)
+            self.add_to_outbox(msg)
 
         self.notify()
 
