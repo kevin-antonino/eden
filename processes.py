@@ -10,7 +10,7 @@ class Process(ABC):
         ## Communication ## 
         self.inbox: dict[Process, deque[Message]] = {} 
         self.outbox: dict[Process, deque[Message]] = {} 
-        self.next_causal_msg = NullMessage()
+        self.next_causal_msg = None
 
         ## Deadlock Detection
         self.blocked = True     # Make an enum?
@@ -30,9 +30,9 @@ class Process(ABC):
         # Error if process is not in list
         self.inbox[message.sender].append(message)
         
-        if isinstance(self.next_causal_msg, NullMessage):
-            # check inbox for next causal message 
-            self.check_inbox()
+        # check inbox for next causal message 
+        if not self.next_causal_msg:
+            self.next_causal_msg = self.find_next_message()
         
         # Deadlock detection signalling
         if self.engaged:
@@ -42,14 +42,19 @@ class Process(ABC):
             self.engaged = True
             self.parent = message.sender
 
-    def check_inbox(self):
+    def find_next_message(self):
+        next_msg = None
+        next_timestamp = float('inf')
         for p in self.inbox.keys():
             if not self.inbox[p]:
                 self.blocked = True
                 print(f'{self.name} is waiting on {p.name} at {self.get_timestamp()}')
                 break
-            if self.inbox[p][0].timestamp < self.next_causal_msg.timestamp:
-                self.next_causal_msg = self.inbox[p][0]
+            if self.inbox[p][0].timestamp < next_timestamp:
+                next_msg = self.inbox[p][0]
+                next_timestamp = next_msg.timestamp
+                self.blocked = False
+        return next_msg
 
     def signal(self):
         self.count = 0
@@ -100,7 +105,7 @@ class PhysicalProcess(Process):
 
     def execute(self):
         # Check for messages to read
-        if isinstance(self.next_causal_msg, NullMessage):
+        if not self.next_causal_msg:
             if self.count == 0:
                 self.engaged = False
                 print(f'{self.name}: Blocked and disengaged. Signalling to parent...')
@@ -108,26 +113,13 @@ class PhysicalProcess(Process):
             return
 
         else:
-            # Find time to propagate to
-            prop_time = self.next_causal_msg.timestamp
-            for p in self.output_processes: 
-                if p.get_next_timestamp() < prop_time:
-                    prop_time = p.get_next_timestamp()
-
-            # propagate system 
-            while self.get_timestamp() < prop_time:
-                self.evolve()
-                self.increment_time()
-                for process in self.output_processes:
-                    if self.get_timestamp() <= process.get_next_timestamp() and \
-                        self.get_next_timestamp() > process.get_next_timestamp():
-                        msg = OutputMessage(self, process)
-                        self.add_to_outbox(msg)
+            prop_time = self.find_propagation_time()
+            self.propagate_to(prop_time)
             
             # if close to next message, read it
             if abs(prop_time - self.next_causal_msg.timestamp) < self.TIME_TOL:
                 self.next_causal_msg.open()
-                self.check_inbox()
+                self.next_causal_msg = self.find_next_message()
             
             # Notify output systems 
             self.notify()
@@ -145,6 +137,25 @@ class PhysicalProcess(Process):
             self.minor_tick = 0
             self.major_tick += 1
 
+    def find_propagation_time(self):
+        prop_time = self.get_timestamp()
+        if self.next_causal_msg:
+            prop_time = self.next_causal_msg.timestamp
+            for p in self.output_processes: 
+                if p.get_next_timestamp() < prop_time:
+                    prop_time = p.get_next_timestamp()
+
+        return prop_time
+
+    def propagate_to(self, prop_time):
+        while self.get_timestamp() < prop_time:
+            self.evolve()
+            self.increment_time()
+            for process in self.output_processes:
+                if self.get_timestamp() <= process.get_next_timestamp() and \
+                    self.get_next_timestamp() > process.get_next_timestamp():
+                    msg = OutputMessage(self, process)
+                    self.add_to_outbox(msg)
 
     def initialize(self):
         print(f'{self.name} is initializing...')
@@ -194,7 +205,7 @@ class Controller(Process):
             earliest_time = float('inf')
             earliest_msg = NullMessage()
             for p in self.outbox.keys():
-                msg = p.check_inbox() 
+                msg = p.find_next_message() 
                 if msg.timestamp < earliest_time:
                     earliest_time = msg.timestamp
                     earliest_msg = msg
