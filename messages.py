@@ -14,6 +14,7 @@ class Message(ABC):
         self.sender.count += 1
 
     def remove(self) -> None:
+        self.receiver.next_causal_msg = NullMessage()
         if self. sender not in self.receiver.inbox.keys():
             return
 
@@ -32,7 +33,9 @@ class Message(ABC):
 
 class NullMessage(Message):
     def __init__(self):
-        pass
+        self.sender = None
+        self.receiver = None
+        self.timestamp : float = float('inf')
 
     def read(self):
         pass

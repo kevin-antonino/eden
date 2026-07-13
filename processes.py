@@ -1,5 +1,4 @@
 from collections import deque
-from dataclasses import dataclass
 from copy import copy
 from messages import *
 
@@ -10,6 +9,7 @@ class Process(ABC):
         ## Communication ## 
         self.inbox = {}       # Process : Message Queue pairs that this process will wait for
         self.outbox = {}      # Process : Message Queue pairs that will wait for this process
+        self.next_causal_msg = NullMessage()
 
         ## Deadlock Detection
         self.blocked = True
@@ -28,12 +28,27 @@ class Process(ABC):
     def receive_message(self, message):
         # Error if process is not in list
         self.inbox[message.sender].append(message)
+        
+        if isinstance(self.next_causal_msg, NullMessage):
+            # check inbox for next causal message 
+            self.check_inbox()
+        
+        # Deadlock detection signalling
         if self.engaged:
             print(f'{self.name}: Already engaged. Signalling...')
             message.sender.signal()
         else:
             self.engaged = True
             self.parent = message.sender
+
+    def check_inbox(self):
+        for p in self.inbox.keys():
+            if not self.inbox[p]:
+                self.blocked = True
+                print(f'{self.name} is waiting on {p.name} at {self.get_timestamp()}')
+                break
+            if self.inbox[p][0].timestamp < self.next_causal_msg.timestamp:
+                self.next_causal_msg = self.inbox[p][0]
 
     def signal(self):
         self.count = 0
@@ -82,60 +97,37 @@ class PhysicalProcess(Process):
         self.output_processes = set() # Set of subscribers to be notified when this process evolves
 
     def execute(self):
-        # Get Earliest Message 
-        msg = self.check_inbox()
+        # Check for messages to read
+        if isinstance(self.next_causal_msg, NullMessage):
+            if self.count == 0:
+                self.engaged = False
+                print(f'{self.name}: Blocked and disengaged. Signalling to parent...')
+                self.parent.signal()  
+            return
 
-        if not self.blocked: 
-            # Update system so msg is in [ts, ts+L]
-            prop_time = self.get_propagation_time(msg)
-            self.propagate_to(prop_time)
+        else:
+            # Find time to propagate to
+            prop_time = self.next_causal_msg.timestamp
+            for p in self.output_processes: 
+                if p.get_next_timestamp() < prop_time:
+                    prop_time = p.get_next_timestamp()
 
-            if abs(prop_time - msg.timestamp) < 0.0001:
-                # perform action now that it's between [ts, ts+L]
-                msg.open()
-
-                # Respond to any messages
-                self.notify()
-
-    def get_propagation_time(self, msg):
-        prop_time = msg.timestamp
-        for p in self.output_processes:
-            if p.get_next_timestamp() < prop_time:
-                prop_time = p.get_next_timestamp()
-
-        return prop_time
-
-    def propagate_to(self, t):
-        while self.get_timestamp() < t:
-            self.evolve()
-            self.increment_time()
-            for process in self.output_processes:
-                if self.get_timestamp() <= process.get_next_timestamp() and self.get_next_timestamp() > process.get_next_timestamp():
-                    OutputMessage(self, process)
-
+            # propagate system 
+            while self.get_timestamp() < prop_time:
+                self.evolve()
+                self.increment_time()
+                for process in self.output_processes:
+                    if self.get_timestamp() <= process.get_next_timestamp() and \
+                        self.get_next_timestamp() > process.get_next_timestamp():
+                        OutputMessage(self, process)
+            
+            # if close to next message, read it
+            if abs(prop_time - self.next_causal_msg.timestamp) < 0.0001:
+                self.next_causal_msg.open()
+                self.check_inbox()
+            
+            # Notify output systems 
             self.notify()
-
-    def check_inbox(self): 
-        min_msg_time = float('inf')
-        earliest_msg = NullMessage()
-        self.blocked = False
-        for process in self.inbox.keys():
-            if not self.inbox[process]: 
-                self.blocked = True
-                print(f'{self.name} is waiting on {process.name} at {self.get_timestamp()}')
-                if self.count == 0:
-                    self.engaged = False
-                    print(f'{self.name}: Blocked and disengaged. Signalling to parent...')
-                    self.parent.signal()  
-                break
-
-            else:
-                first_msg = self.inbox[process][0]
-                if first_msg.timestamp < min_msg_time:
-                    min_msg_time = first_msg.timestamp
-                    earliest_msg = first_msg
-
-        return earliest_msg
 
     def evolve(self):
         # Update internal state by dt
