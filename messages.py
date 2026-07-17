@@ -1,90 +1,79 @@
-from abc import ABC, abstractmethod
-from processes import *
+from collections import deque
+from dataclasses import dataclass
+from enum import Enum, auto
 
-class Message(ABC):
-    def __init__(self, sender : Process, receiver : Process):
-        self.sender : Process       = sender
-        self.receiver : Process     = receiver
-        self.timestamp : float      = sender.get_timestamp()
+class Actions(Enum):
+    START           = auto()
+    TERMINATE       = auto()
+    PULL            = auto() 
+    INIT_COMPLETE   = auto()
+    SIM_COMPLETE    = auto()
 
-    def send(self) -> None:
-        print(f'{self.sender.name}: Sending message to {self.receiver.name} at {self.timestamp}')
-        self.receiver.receive_message(self)
-        self.sender.count += 1
+@dataclass(frozen=True)
+class Message:
+    self.sender: "Process"
+    self.receiver: "Process"
+    self.action: Action 
+    self.timestamp: float
 
-    def remove(self) -> None:
-        self.receiver.next_causal_msg = NullMessage()
-        if self. sender not in self.receiver.inbox.keys():
-            return
+    def __post_init__:
+        self.timestamp = self.sender.timestamp
 
-        if self is not self.receiver.inbox[self.sender][0]:
-            print(f'Something with this message is fucked up')
-        else:
-            self.receiver.inbox[self.sender].popleft()
+@dataclass(frozen=True)
+class Start(Message):
+    self.action: Actions.START
 
-    @abstractmethod
-    def read(self) -> None:
-        ...
-    
-    def open(self):
-        self.read()
-        self.remove()
-
-class NullMessage(Message):
-    def __init__(self):
-        self.sender = None
-        self.receiver = None
-        self.timestamp : float = float('inf')
-
-    def read(self):
-        pass
-
-    def open(self):
-        pass
-
-class OutputMessage(Message):
-    def __init__(self, sender: Process, receiver: Process) -> None:
-        super().__init__(sender, receiver)
-        self.output = self.sender.get_output(self.timestamp) 
-
-    def read(self):
-        print(f'{self.receiver.name}: Pulling input from {self.sender.name} valid at {self.timestamp}')
-        self.receiver.pull(self.output)
-
-class Begin(Message):
-    def __init__(self, sender: Controller, receiver: Process) -> None:
-        super().__init__(sender, receiver)
-        self.timestamp = self.receiver.t0
-
-    def read(self):
-        print(f'{self.receiver.name}: Opened Begin message. Starting at {self.receiver.get_timestamp()}')
-        self.receiver.initialize()
-        msg = InitializationComplete(self.receiver, self.sender)    
-        self.receiver.add_to_outbox(msg)
-
+@dataclass(frozen=True)
 class Terminate(Message):
-    def __init__(self, sender: Controller, receiver: Process) -> None:
-        super().__init__(sender, receiver)
-        self.timestamp = receiver.tf
+    self.action: Actions.TERMINATE
 
-    def read(self):
-        self.receiver.finish() 
-        print(f'{self.receiver.name}: End message Received. {self.receiver.name} is Done!')
-
+@dataclass(frozen=True)
 class InitializationComplete(Message):
-    def __init__(self, sender: Process, receiver: Controller) -> None:
-        super().__init__(sender, receiver)
+    self.action: Actions.INIT_COMPLETE
 
-    def read(self):
-        msg = Terminate(self.receiver, self.sender)
-        self.receiver.add_to_outbox(msg)
-
+@dataclass(frozen=True)
 class SimulationComplete(Message):
-    def __init__(self, sender: Process, receiver: Process) -> None:
-        super().__init__(sender, receiver)
+    self.action: Actions.SIM_COMPLETE
 
-    def read(self):
-        print(f'{self.receiver.name}: Notified that {self.sender.name} is done!')
-        self.receiver.inbox.pop(self.sender)
-        self.receiver.outbox.pop(self.sender, 0)
+@dataclass(frozen=True)
+class OutputMessage(Message):
+    self.action: Actions.PULL
+    self.output = sender.output
+
+class Mailbox():
+    def __init__(self):
+        self.inbox: dict["Process", deque[Message]] = {} 
+        self.outbox: dict["Process", deque[Message]] = {} 
+
+    def receive_message(self, msg):
+        if msg.sender not in self.inbox.keys():
+            raise ValueError(f'{msg.sender} not in inbox!') 
+        self.inbox[msg.sender].append(msg)
+
+    def get_next_message(self):
+        next_msg = None
+        next_timestamp = float('inf')
+        for p in self.inbox.keys():
+            if not self.inbox[p]:
+                break
+            if self.inbox[p][0].timestamp < next_timestamp:
+                next_msg = self.inbox[p][0]
+                next_timestamp = next_msg.timestamp
+        if next_msg is not None:
+            self.inbox[next_msg.sender].popleft()
+
+        return next_msg
+
+    def remove_process(self, p):
+        self.inbox.pop(self.sender)
+        self.outbox.pop(self.sender, 0)
+   
+    def add_sender(self, sender):
+        self.inbox[sender] = deque()
+
+    def add_receiver(self, receiver):
+        self.outbox[receiver] = deque()
+
+class PostalService():
+    
 

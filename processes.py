@@ -8,8 +8,7 @@ class Process(ABC):
         self.name = ''
         
         ## Communication ## 
-        self.inbox: dict[Process, deque[Message]] = {} 
-        self.outbox: dict[Process, deque[Message]] = {} 
+        self.mailbox = Mailbox()
         self.next_causal_msg = None
 
         ## Deadlock Detection
@@ -19,20 +18,17 @@ class Process(ABC):
         self.parent = None
 
     @abstractmethod
-    def initialize(self):
-        pass
-
-    @abstractmethod
     def execute(self):
         pass
 
-    def receive_message(self, message):
-        # Error if process is not in list
-        self.inbox[message.sender].append(message)
-        
+    @abstractmethod
+    def process_message(self, msg):
+        pass
+
+    def check_inbox(self, message):
         # check inbox for next causal message 
         if not self.next_causal_msg:
-            self.next_causal_msg = self.find_next_message()
+            self.next_causal_msg = self.mailbox.get_next_message()
         
         # Deadlock detection signalling
         if self.engaged:
@@ -42,28 +38,15 @@ class Process(ABC):
             self.engaged = True
             self.parent = message.sender
 
-    def find_next_message(self):
-        next_msg = None
-        next_timestamp = float('inf')
-        for p in self.inbox.keys():
-            if not self.inbox[p]:
-                self.blocked = True
-                print(f'{self.name} is waiting on {p.name} at {self.get_timestamp()}')
-                break
-            if self.inbox[p][0].timestamp < next_timestamp:
-                next_msg = self.inbox[p][0]
-                next_timestamp = next_msg.timestamp
-                self.blocked = False
-        return next_msg
-
     def signal(self):
         self.count = 0
         print(f'{self.name}: signal recieved')
 
     def finish(self):
-        for pr in self.outbox.keys():
-            msg = SimulationComplete(self, pr)
-            self.add_to_outbox(msg)
+        pass
+
+    def initialize(self):
+        pass
 
     def link_to(self, p):
         print(f'{self.name} is now linked to {p.name}')
@@ -104,21 +87,15 @@ class PhysicalProcess(Process):
         self.output_processes = set() # Set of subscribers to be notified when this process evolves
 
     def execute(self):
-        # Check for messages to read
-        if not self.next_causal_msg:
-            if self.count == 0:
-                self.engaged = False
-                print(f'{self.name}: Blocked and disengaged. Signalling to parent...')
-                self.parent.signal()  
-            return
+        self.check_inbox()
 
-        else:
+        if  self.next_causal_msg:
             prop_time = self.find_propagation_time()
             self.propagate_to(prop_time)
             
             # if close to next message, read it
             if abs(prop_time - self.next_causal_msg.timestamp) < self.TIME_TOL:
-                self.next_causal_msg.open()
+                self.process_message(self.next_causal_msg)
                 self.next_causal_msg = self.find_next_message()
             
             # Notify output systems 
@@ -156,6 +133,34 @@ class PhysicalProcess(Process):
                     self.get_next_timestamp() > process.get_next_timestamp():
                     msg = OutputMessage(self, process)
                     self.add_to_outbox(msg)
+
+    def process_message(self, msg):
+        if self.get_timestamp() < msg.timestamp:
+            raise ValueError(f'{self.name:} Attempting to process message in future')
+        
+        match msg.action:
+            case PULL:
+                self.pull(msg.output)
+
+            case START:
+                print(f'{self.name}: Opened Begin message. Starting at {self.get_timestamp()}')
+                self.initialize()
+                msg = InitializationComplete(msg.sender, self)    
+                self.add_to_outbox(msg)
+            
+            case TERMINATE:
+                print(f'{self.name}: End message Received. {self.name} is Done!')
+                self.finish()
+                for pr in self.outbox.keys():
+                    msg = SimulationComplete(self, pr)
+                    self.add_to_outbox(msg)
+
+            case SIM_COMPLETE:
+                print(f'{self.receiver.name}: Notified that {self.sender.name} is done!')
+                self.mailbox.remove_process(msg.sender)
+
+            case _:
+                raise ValueError(f'{self.name:} I dont know what to do with this message')
 
     def initialize(self):
         print(f'{self.name} is initializing...')
@@ -214,6 +219,23 @@ class Controller(Process):
             earliest_msg.receiver.propagate_to(earliest_msg.timestamp)
             self.count += 1 # Controller sending message to process to read a message - come back to this
             
+    def process_message(self, msg):
+        if self.get_timestamp() < msg.timestamp:
+            raise ValueError(f'{self.name:} Attempting to process message in future')
+        
+        match msg.action:
+            case init_complete:
+                msg = Terminate(self.receiver, self.sender)
+                self.receiver.add_to_outbox(msg)
+
+            case sim_complete:
+                print(f'{self.receiver.name}: Notified that {self.sender.name} is done!')
+                self.receiver.inbox.pop(self.sender)
+                self.receiver.outbox.pop(self.sender, 0)
+
+            case _:
+                raise ValueError(f'{self.name:} I dont know what to do with this message')
+
     ## Public ## 
 
     def get_queue(self):
@@ -244,4 +266,9 @@ class Simulation():
                 process.execute()
 
             queue = self.controller.get_queue()
+
+
+    # Pull messages
+    # Execute
+    # Notify
 
