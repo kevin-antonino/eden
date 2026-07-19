@@ -17,27 +17,6 @@ class Message:
     action: Actions 
     timestamp: float = 0
 
-@dataclass(frozen=True)
-class Start(Message):
-    action: Actions = Actions.START
-
-@dataclass(frozen=True)
-class Terminate(Message):
-    action: Actions = Actions.TERMINATE
-
-@dataclass(frozen=True)
-class InitializationComplete(Message):
-    action: Actions = Actions.INIT_COMPLETE
-
-@dataclass(frozen=True)
-class SimulationComplete(Message):
-    action: Actions = Actions.SIM_COMPLETE
-
-@dataclass(frozen=True)
-class OutputMessage(Message):
-    action: Actions = Actions.PULL
-    output = None
-
 class Mailbox():
     def __init__(self):
         self.links: dict["Process", deque] = {}
