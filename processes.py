@@ -1,6 +1,7 @@
 from collections import deque
+from abc import ABC, abstractmethod
 from copy import copy
-from messages import *
+from messaging import *
 
 class Process(ABC):
     TIME_TOL = 0.001
@@ -19,7 +20,7 @@ class Process(ABC):
     def process_message(self, msg):
         pass
 
-    def check_inbox(self, message):
+    def check_inbox(self):
         if not self.next_msg:
             self.next_msg = self.mailbox.get_next_message()
 
@@ -38,8 +39,7 @@ class Process(ABC):
 
     def link_to(self, p):
         print(f'{self.name} is now linked to {p.name}')
-        self.inbox[p] = deque()
-        p.outbox[self] = deque()
+        self.mailbox.add_sender(p)
 
     def get_timestamp(self):
         return 0
@@ -63,6 +63,7 @@ class PhysicalProcess(Process):
 
         ## Communication ## 
         self.output_processes = set() # Set of subscribers to be notified when this process evolves
+        self.controller = None
 
     def execute(self):
         if  self.next_msg:
@@ -72,6 +73,7 @@ class PhysicalProcess(Process):
             # if close to next message, read it
             if abs(prop_time - self.next_msg.timestamp) < self.TIME_TOL:
                 self.process_message(self.next_msg)
+                self.next_msg = None
                 self.check_inbox()
 
     def evolve(self):
@@ -104,7 +106,7 @@ class PhysicalProcess(Process):
             for process in self.output_processes:
                 if self.get_timestamp() <= process.get_next_timestamp() and \
                     self.get_next_timestamp() > process.get_next_timestamp():
-                    msg = OutputMessage(self, process)
+                    msg = Message(self, process, Actions.PULL, self.get_timestamp())
                     self.send(msg)
 
     def process_message(self, msg):
@@ -112,24 +114,27 @@ class PhysicalProcess(Process):
             raise ValueError(f'{self.name:} Attempting to process message in future')
         
         match msg.action:
-            case PULL:
-                self.pull(msg.output)
+            case Actions.PULL:
+                ...
+                #self.pull(msg.output)
 
-            case START:
+            case Actions.START:
                 print(f'{self.name}: Opened Begin message. Starting at {self.get_timestamp()}')
                 self.initialize()
-                msg = InitializationComplete(msg.sender, self)    
+                msg = Message(self, msg.sender, Actions.INIT_COMPLETE, self.get_timestamp())
                 self.send(msg)
             
-            case TERMINATE:
+            case Actions.TERMINATE:
                 print(f'{self.name}: End message Received. {self.name} is Done!')
                 self.finish()
-                for pr in self.outbox.keys():
-                    msg = SimulationComplete(self, pr)
+                msg = Message(self, self.controller, Actions.SIM_COMPLETE, self.get_timestamp())
+                self.send(msg)
+                for pr in self.output_processes:
+                    msg = Message(self, pr, Actions.SIM_COMPLETE, self.get_timestamp())
                     self.send(msg)
 
-            case SIM_COMPLETE:
-                print(f'{self.receiver.name}: Notified that {self.sender.name} is done!')
+            case Actions.SIM_COMPLETE:
+                print(f'{msg.receiver.name}: Notified that {msg.sender.name} is done!')
                 self.mailbox.remove_process(msg.sender)
 
             case _:
@@ -156,14 +161,15 @@ class PhysicalProcess(Process):
 
 class Controller(Process):
     def __init__(self):
-        super().__init__(self)
+        super().__init__()
         self.name = 'Controller'
         self.mailbox = ControllerMailbox()
         self.active_processes = set()
 
     def execute(self):
         while self.next_msg:
-           self.process_message(self.next_msg):
+           self.process_message(self.next_msg)
+           self.next_msg = None
            self.check_inbox()
             
         # Check if sim is over
@@ -173,13 +179,15 @@ class Controller(Process):
 
     def process_message(self, msg):
         match msg.action:
-            case INIT_COMPLETE:
-                msg = Terminate(self.receiver, self)
+            case Actions.INIT_COMPLETE:
+                tf = msg.sender.tf
+                msg = Message(self, msg.sender, Actions.TERMINATE, msg.sender.tf)
                 self.send(msg)
 
-            case SIM_COMPLETE:
+            case Actions.SIM_COMPLETE:
                 print(f'{self.name}: Notified that {msg.sender.name} is done!')
                 self.mailbox.remove_process(msg.sender)
+                self.active_processes.remove(msg.sender)
 
             case _:
                 raise ValueError(f'{self.name:} I dont know what to do with this message')
@@ -194,6 +202,6 @@ class Controller(Process):
     def initialize(self):
         print(f'{self.name}: is initializing...')
         for process in self.active_processes:
-            msg = Begin(self, process)
+            msg = Message(self, process, Actions.START, process.t0)
             self.send(msg)
 

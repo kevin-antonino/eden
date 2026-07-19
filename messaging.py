@@ -14,11 +14,8 @@ class Actions(Enum):
 class Message:
     sender: "Process"
     receiver: "Process"
-    action: Actions
-    timestamp: float
-
-    def __post_init__(self):
-        object.__setattr__(self, 'timestamp', self.sender.timestamp) # yucky
+    action: Actions 
+    timestamp: float = 0
 
 @dataclass(frozen=True)
 class Start(Message):
@@ -39,20 +36,22 @@ class SimulationComplete(Message):
 @dataclass(frozen=True)
 class OutputMessage(Message):
     action: Actions = Actions.PULL
-    output = sender.output
+    output = None
 
 class Mailbox():
     def __init__(self):
         self.links: dict["Process", deque] = {}
         self.inbox = PriorityQueue()
         self.outbox = deque()
+        self.count = 0
 
-    def receive_message(self, msg):
+    def receive_message(self, msg: Message):
         if msg.sender not in self.links:
-            raise ValueError(f'{msg.sender} not in inbox!') 
+            raise ValueError(f'{msg.sender.name} not in {msg.receiver.name}\'s inbox!') 
 
         if not self.links[msg.sender]:
-            self.inbox.put((msg.timestamp, msg))
+            self.inbox.put((msg.timestamp, self.count, msg))
+            self.count += 1
 
         self.links[msg.sender].append(msg)
 
@@ -61,13 +60,14 @@ class Mailbox():
 
     def get_next_message(self):
         next_msg = None
-        if self.inbox.qsize() == len(self.links.keys()):
-            next_msg = self.inbox.get()
+        if not self.inbox.empty() and self.inbox.qsize() == len(self.links.keys()):
+            _, _, next_msg = self.inbox.get()
             self.links[next_msg.sender].popleft()
             # If there is another message in the queue, put it into the inbox
             queue = self.links[next_msg.sender]
             if queue:
-                self.inbox.put((queue[0].timestamp, queue[0]))
+                self.inbox.put((msg.timestamp, self.count, next_msg))
+                self.count += 1
 
         return next_msg
 
@@ -82,15 +82,16 @@ class Mailbox():
 
 class ControllerMailbox(Mailbox):
     def __init__(self):
-        super().__init__(self):
+        super().__init__()
 
-    def receive_message(self, msg):
-        self.inbox.put((msg.timestamp, msg))
+    def receive_message(self, msg: Message):
+        self.inbox.put((msg.timestamp, self.count, msg))
+        self.count += 1
 
     def get_next_message(self):
         next_msg = None
-        if self.inbox:
-            next_msg = self.inbox.get()
+        if not self.inbox.empty():
+            _, _, next_msg = self.inbox.get()
 
         return next_msg
 
@@ -101,9 +102,10 @@ class PostalService():
     def register(self, process):
         self.mailboxes[process] = process.mailbox
 
-    def deliver(self, process):
-        msg_queue = self.mailboxes[process].get_outbox()
-        while msg_queue:
-            msg = msg_queue.pop()
-            self.mailboxes[msg.receiver].receive_message(msg)
-
+    def deliver(self):
+        for mb in self.mailboxes.values():
+            msg_queue = mb.get_outbox()
+            while msg_queue:
+                msg = msg_queue.popleft()
+                self.mailboxes[msg.receiver].receive_message(msg)
+                print(f'Sending {msg.action} message to {msg.receiver.name} ')
