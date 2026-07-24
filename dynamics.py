@@ -1,7 +1,7 @@
 from processes import PhysicalProcess:
 from abc import abstractmethod
 
-class DynamicSystem(Process):
+class DynamicSystem(PhysicalProcess):
     def __init__(self, n_states: int, n_inputs: int, n_outputs: int, name: str ='n/a'):
         super().__init__()
         self.integrator = RungeKutta4() 
@@ -33,3 +33,18 @@ class DynamicSystem(Process):
         y = g(x, u, t)
         '''
         ...
+
+class LinearSystem(DynamicSystem):
+    def __init__(self, A: ndarray, B: ndarray, C: ndarray, D: ndarray, name: str ='n/a'):
+        self.A, self.B, self.C, self.D = A, B, C, D # System Matrices
+        super().__init__(self, A.shape[1], B.shape[1], C.shape[0], name=name)
+
+    def dynamic_equation(self, x: ndarray, u: ndarray, t: float) -> ndarray:
+        xdot = self.A @ x + self.B @ u
+        return xdot
+
+    def output_equation(self, x: ndarray, u: ndarray, t: float) -> ndarray:
+        y = self.C @ x + self.D @ u
+        return y
+
+
