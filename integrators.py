@@ -43,7 +43,7 @@ class RungeKutta4(Integrator):
         xf = x0 + 1/6 * (k1 + 2*k2 + 2*k3 + k4)
         return xf
 
-class NullIntegrator(Integrator):
+class DiscreteIntegrator(Integrator):
     def integrate_system_dynamics(
         self,
         x0: ndarray,
@@ -52,4 +52,5 @@ class NullIntegrator(Integrator):
         t0: float,
         tf: float
     ) -> ndarray:
-        return x0
+        xf = dx_dt(x0, u0, t0) + x0
+        return xf

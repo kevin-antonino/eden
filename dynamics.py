@@ -8,7 +8,6 @@ class DynamicSystem(PhysicalProcess):
         self.state  = zeros((n_states, 1))
         self.input = zeros((n_inputs, 1))
         self.output = zeros((n_inputs, 1))
-        self.x0 = zeros((n_states,1))
 
     def evolve(self) -> None:
         # Evaluate x[k] = F(x[k-1], u[k-1], k-1) 
@@ -46,5 +45,3 @@ class LinearSystem(DynamicSystem):
     def output_equation(self, x: ndarray, u: ndarray, t: float) -> ndarray:
         y = self.C @ x + self.D @ u
         return y
-
-
