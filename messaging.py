@@ -41,11 +41,11 @@ class Mailbox():
         next_msg = None
         if not self.inbox.empty() and self.inbox.qsize() == len(self.links.keys()):
             _, _, next_msg = self.inbox.get()
-            self.links[next_msg.sender].popleft()
+            msg = self.links[next_msg.sender].popleft()
             # If there is another message in the queue, put it into the inbox
             queue = self.links[next_msg.sender]
             if queue:
-                self.inbox.put((msg.timestamp, self.count, next_msg))
+                self.inbox.put((queue[0].timestamp, self.count, queue[0]))
                 self.count += 1
 
         return next_msg
@@ -87,4 +87,4 @@ class PostalService():
             while msg_queue:
                 msg = msg_queue.popleft()
                 self.mailboxes[msg.receiver].receive_message(msg)
-                print(f'Sending {msg.action} message to {msg.receiver.name} ')
+                print(f'{msg.sender.name} is sending {msg.action} message to {msg.receiver.name} at {msg.timestamp}')

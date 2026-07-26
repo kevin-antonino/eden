@@ -75,6 +75,9 @@ class PhysicalProcess(Process):
                 self.process_message(self.next_msg)
                 self.next_msg = None
                 self.check_inbox()
+        else:
+            #print(f'{self.name} is stuck')
+            ...
 
     def evolve(self):
         # Update internal state by dt
@@ -104,10 +107,12 @@ class PhysicalProcess(Process):
             self.evolve()
             self.increment_time()
             for process in self.output_processes:
-                if self.get_timestamp() <= process.get_next_timestamp() and \
-                    self.get_next_timestamp() > process.get_next_timestamp():
-                    msg = Message(self, process, Actions.PULL, self.get_timestamp())
-                    self.send(msg)
+                # Primary causality constraint 
+                if self.get_timestamp() - process.get_next_timestamp() < self.TIME_TOL:
+                    # Only send messages when you need to
+                    if self.get_next_timestamp() - process.get_next_timestamp() > self.TIME_TOL:
+                        msg = Message(self, process, Actions.PULL, self.get_timestamp())
+                        self.send(msg)
 
     def process_message(self, msg):
         if self.get_timestamp() < msg.timestamp:
@@ -115,13 +120,15 @@ class PhysicalProcess(Process):
         
         match msg.action:
             case Actions.PULL:
+                print(f'{self.name} is pulling input from {msg.sender.name} valid at {msg.timestamp}')
                 ...
                 #self.pull(msg.output)
 
             case Actions.START:
                 print(f'{self.name}: Opened Begin message. Starting at {self.get_timestamp()}')
                 self.initialize()
-                msg = Message(self, msg.sender, Actions.INIT_COMPLETE, self.get_timestamp())
+                # Tell Controller init is done
+                msg = Message(self, self.controller, Actions.INIT_COMPLETE, self.get_timestamp())
                 self.send(msg)
             
             case Actions.TERMINATE:
@@ -136,6 +143,10 @@ class PhysicalProcess(Process):
             case Actions.SIM_COMPLETE:
                 print(f'{msg.receiver.name}: Notified that {msg.sender.name} is done!')
                 self.mailbox.remove_process(msg.sender)
+            
+            case Actions.INIT_COMPLETE:
+                print(f'{self.name} received null message from {msg.sender.name}')
+                pass # null message
 
             case _:
                 raise ValueError(f'{self.name:} I dont know what to do with this message')
