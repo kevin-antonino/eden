@@ -130,6 +130,10 @@ class PhysicalProcess(Process):
                 # Tell Controller init is done
                 msg = Message(self, self.controller, Actions.INIT_COMPLETE, self.get_timestamp())
                 self.send(msg)
+                if self.logger:
+                    msg = Message(self, self.logger, Actions.PULL, self.get_timestamp()) # Could the logger not be ready yet? 
+                    self.send(msg)
+
             
             case Actions.TERMINATE:
                 print(f'{self.name}: End message Received. {self.name} is Done!')
@@ -143,10 +147,6 @@ class PhysicalProcess(Process):
             case Actions.SIM_COMPLETE:
                 print(f'{msg.receiver.name}: Notified that {msg.sender.name} is done!')
                 self.mailbox.remove_process(msg.sender)
-            
-            case Actions.INIT_COMPLETE:
-                print(f'{self.name} received null message from {msg.sender.name}')
-                pass # null message
 
             case _:
                 raise ValueError(f'{self.name:} I dont know what to do with this message')
@@ -216,3 +216,42 @@ class Controller(Process):
             msg = Message(self, process, Actions.START, process.t0)
             self.send(msg)
 
+class Logger(Process):
+    def __init__(self):
+        super().__init__()
+        self.mailbox = ControllerMailbox() # This could share code with controller
+        self.log = None
+    
+    def execute(self):
+        while self.next_msg:
+           self.process_message(self.next_msg)
+           self.next_msg = None
+           self.check_inbox() # This could share code with controller
+    
+    def initialize(self):
+        # Pre-allocate arrays 
+   
+    def pull(self):
+        # Log the data
+    
+    def process_message(self, msg):
+        match msg.action:
+            case Actions.START:
+                print(f'{self.name}: Got start message')
+                self.initialize()  
+
+            case Actions.PULL:
+                print(f'{self.name} is logging data from {msg.sender.name} valid at {msg.timestamp}')
+                ...
+                #self.pull(msg.output)
+
+            case Actions.SIM_COMPLETE:
+                print(f'{msg.receiver.name}: Notified that {msg.sender.name} is done!')
+                self.mailbox.remove_process(msg.sender)
+                # Terminate code. Need another check here if logging from multiple
+                self.finish()
+                msg = Message(self, self.controller, Actions.SIM_COMPLETE, self.get_timestamp())
+                self.send(msg)
+
+            case _:
+                raise ValueError(f'{self.name:} I dont know what to do with this message')

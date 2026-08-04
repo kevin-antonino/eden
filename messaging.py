@@ -64,7 +64,7 @@ class ControllerMailbox(Mailbox):
         super().__init__()
 
     def receive_message(self, msg: Message):
-        self.inbox.put((msg.timestamp, self.count, msg))
+        self.inbox.put((msg.timestamp, self.count, msg)) # FIFO deque may be best
         self.count += 1
 
     def get_next_message(self):
