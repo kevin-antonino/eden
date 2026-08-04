@@ -44,7 +44,5 @@ class LinearSystem(DynamicSystem):
         xdot = self.A @ x + self.B @ u
         return xdot
 
-    def output_equation(self, x: ndarray, u: ndarray, t: float) -> ndarray:
-        y = self.C @ x + self.D @ u
-        print(y)
+    def output_equation(self, x: ndarray, u: ndarray, t: float) -> ndarray: y = self.C @ x + self.D @ u
         return y
