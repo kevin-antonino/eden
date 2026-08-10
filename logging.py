@@ -5,8 +5,7 @@ from math import ceil
 class Logger(Process):
     def __init__(self):
         super().__init__()
-        self.mailbox = ControllerMailbox() # This could share code with controller
-        self.process = None
+        self.channels = None
 
         ## Logging contents. Perhaps move to a separate class
         self.index = 0
@@ -14,15 +13,11 @@ class Logger(Process):
         self.output_log = None
         self.time_log = None
     
-    def execute(self):
-        while self.next_msg:
-           self.process_message(self.next_msg)
-           self.next_msg = None
-           self.check_inbox() # This could share code with controller
-    
     def initialize(self):
+        self.channels = [process for process in self.mailbox.links if process is not self.controller] 
+        process = self.channels[0] # Will break for multi channel
         # Pre-allocate arrays 
-        n = ceil((self.process.tf - self.process.t0) * self.process.frequency)
+        n = ceil((process.tf - process.t0) * process.frequency)
         self.state_log = [None] * n
         self.output_log = [None] * n
         self.time_log = [None] * n
@@ -47,11 +42,12 @@ class Logger(Process):
 
             case Actions.SIM_COMPLETE:
                 print(f'{msg.receiver.name}: Notified that {msg.sender.name} is done!')
-                self.mailbox.remove_process(msg.sender)
-                # Terminate code. Need another check here if logging from multiple
-                self.finish()
-                msg = Message(self, self.controller, Actions.SIM_COMPLETE, self.get_timestamp())
-                self.send(msg)
+                self.mailbox.disconnect_sender(msg.sender)
+                self.channels.remove(msg.sender)
+                if not self.channels:
+                    self.finish()
+                    msg = Message(self, self.controller, Actions.SIM_COMPLETE, self.get_timestamp())
+                    self.send(msg)
 
             case _:
                 raise ValueError(f'{self.name:} I dont know what to do with this message')
