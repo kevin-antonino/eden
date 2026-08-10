@@ -9,24 +9,22 @@ class Process(ABC):
         self.name = ''
         
         ## Communication ## 
-        self.mailbox = Mailbox()
+        self.mailbox = ControllerMailbox()
         self.next_msg = None
-
-    @abstractmethod
-    def execute(self):
-        pass
 
     @abstractmethod
     def process_message(self, msg):
         pass
 
+    def execute(self):
+        while self.next_msg:
+           self.process_message(self.next_msg)
+           self.next_msg = None
+           self.check_inbox()
+
     def check_inbox(self):
         if not self.next_msg:
             self.next_msg = self.mailbox.get_next_message()
-
-    def signal(self):
-        self.count = 0
-        print(f'{self.name}: signal recieved')
 
     def send(self, msg):
         self.mailbox.add_to_outbox(msg)
@@ -41,15 +39,11 @@ class Process(ABC):
         print(f'{self.name} is now linked to {p.name}')
         self.mailbox.add_sender(p)
 
-    def get_timestamp(self):
-        return 0
-
-    def get_next_timestamp(self):
-        return float('inf')
 
 class PhysicalProcess(Process):
     def __init__(self):
         super().__init__()
+        self.mailbox = Mailbox()
 
         ## State & I/O ##
         self.state  = None
@@ -88,9 +82,6 @@ class PhysicalProcess(Process):
     def evolve(self):
         # Update internal state by dt
         print(f'{self.name}: Evolving from {self.get_timestamp()} to {self.get_timestamp() + 1/self.frequency}')
-
-    def pull(self, output):
-        return
 
     def increment_time(self):
         self.tick += 1
@@ -189,24 +180,11 @@ class Controller(Process):
     def __init__(self):
         super().__init__()
         self.name = 'Controller'
-        self.mailbox = ControllerMailbox()
         self.active_processes = set()
-
-    def execute(self):
-        while self.next_msg:
-           self.process_message(self.next_msg)
-           self.next_msg = None
-           self.check_inbox()
-            
-        # Check if sim is over
-        if not self.active_processes:
-            self.finish()
-            return
 
     def process_message(self, msg):
         match msg.action:
             case Actions.INIT_COMPLETE:
-                tf = msg.sender.tf
                 msg = Message(self, msg.sender, Actions.TERMINATE, msg.sender.tf)
                 self.send(msg)
 
@@ -214,6 +192,8 @@ class Controller(Process):
                 print(f'{self.name}: Notified that {msg.sender.name} is done!')
                 self.mailbox.disconnect_sender(msg.sender)
                 self.active_processes.remove(msg.sender)
+                if not self.active_processes:
+                    self.finish()
 
             case _:
                 raise ValueError(f'{self.name:} I dont know what to do with this message')
