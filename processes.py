@@ -51,19 +51,25 @@ class PhysicalProcess(Process):
     def __init__(self):
         super().__init__()
 
-        ## I/O ##
-        self.output = 0
+        ## State & I/O ##
+        self.state  = None
+        self.input  = None
+        self.output = None
         
         ## Timekeeping ##
         self.t0 = 0
         self.tf = 1
         self.frequency = 10 
-        self.minor_tick = 0
-        self.major_tick = 0
+        self.tick = 0
 
         ## Communication ## 
         self.output_processes = set() # Set of subscribers to be notified when this process evolves
         self.controller = None
+
+        ## Logging ##
+        self.logger = None
+        self.batch_size = 1000
+        self.log_buffer = deque()
 
     def execute(self):
         if  self.next_msg:
@@ -87,10 +93,7 @@ class PhysicalProcess(Process):
         return
 
     def increment_time(self):
-        self.minor_tick += 1
-        if self.minor_tick == self.frequency:
-            self.minor_tick = 0
-            self.major_tick += 1
+        self.tick += 1
 
     def find_propagation_time(self):
         prop_time = self.get_timestamp()
@@ -106,23 +109,27 @@ class PhysicalProcess(Process):
         while self.get_timestamp() < prop_time:
             self.evolve()
             self.increment_time()
-            for process in self.output_processes:
-                # Primary causality constraint 
-                if self.get_timestamp() - process.get_next_timestamp() < self.TIME_TOL:
-                    # Only send messages when you need to
-                    if self.get_next_timestamp() - process.get_next_timestamp() > self.TIME_TOL:
-                        msg = Message(self, process, Actions.PULL, self.get_timestamp())
-                        self.send(msg)
+            if self.logger:
+                self.log()
+            self.notify_output_processes()
+
+    def notify_output_processes(self):
+        for process in self.output_processes:
+            # Primary causality constraint 
+            if self.get_timestamp() - process.get_next_timestamp() < self.TIME_TOL:
+                # Only send messages when you need to
+                if self.get_next_timestamp() - process.get_next_timestamp() > self.TIME_TOL:
+                    msg = Message(self, process, Actions.PULL_OUTPUT, self.get_timestamp(), self.output)
+                    self.send(msg)
 
     def process_message(self, msg):
         if self.get_timestamp() < msg.timestamp:
             raise ValueError(f'{self.name:} Attempting to process message in future')
         
         match msg.action:
-            case Actions.PULL:
+            case Actions.PULL_OUTPUT:
                 print(f'{self.name} is pulling input from {msg.sender.name} valid at {msg.timestamp}')
-                ...
-                #self.pull(msg.output)
+                self.input = msg.payload
 
             case Actions.START:
                 print(f'{self.name}: Opened Begin message. Starting at {self.get_timestamp()}')
@@ -130,14 +137,12 @@ class PhysicalProcess(Process):
                 # Tell Controller init is done
                 msg = Message(self, self.controller, Actions.INIT_COMPLETE, self.get_timestamp())
                 self.send(msg)
-                if self.logger:
-                    msg = Message(self, self.logger, Actions.PULL, self.get_timestamp()) # Could the logger not be ready yet? 
-                    self.send(msg)
-
             
             case Actions.TERMINATE:
                 print(f'{self.name}: End message Received. {self.name} is Done!')
                 self.finish()
+                if self.logger:
+                    self.flush_log()
                 msg = Message(self, self.controller, Actions.SIM_COMPLETE, self.get_timestamp())
                 self.send(msg)
                 for pr in self.output_processes:
@@ -146,7 +151,7 @@ class PhysicalProcess(Process):
 
             case Actions.SIM_COMPLETE:
                 print(f'{msg.receiver.name}: Notified that {msg.sender.name} is done!')
-                self.mailbox.remove_process(msg.sender)
+                self.mailbox.disconnect_sender(msg.sender)
 
             case _:
                 raise ValueError(f'{self.name:} I dont know what to do with this message')
@@ -154,6 +159,16 @@ class PhysicalProcess(Process):
     def initialize(self):
         print(f'{self.name} is initializing...')
         pass 
+    
+    def log(self):
+        self.log_buffer.append((self.state, self.output, self.get_timestamp()))
+        if len(self.log_buffer) == self.batch_size:
+            self.flush_log()
+
+    def flush_log(self):
+        msg = Message(self, self.logger, Actions.LOG, self.get_timestamp(), self.log_buffer) # buffer has to be a shallow copy!
+        self.log_buffer = deque()
+        self.send(msg)
 
      ## Public ## 
 
@@ -162,10 +177,10 @@ class PhysicalProcess(Process):
        self.output_processes.add(p) # Self will message P every time it evolves
 
     def get_timestamp(self):
-        return self.minor_tick / self.frequency + self.major_tick
+        return self.tick / self.frequency 
     
     def get_next_timestamp(self):
-        return (self.minor_tick + 1) / self.frequency + self.major_tick 
+        return (self.tick + 1) / self.frequency 
 
     def get_output(self, timestamp):
         return self.output
@@ -197,7 +212,7 @@ class Controller(Process):
 
             case Actions.SIM_COMPLETE:
                 print(f'{self.name}: Notified that {msg.sender.name} is done!')
-                self.mailbox.remove_process(msg.sender)
+                self.mailbox.disconnect_sender(msg.sender)
                 self.active_processes.remove(msg.sender)
 
             case _:
@@ -215,43 +230,3 @@ class Controller(Process):
         for process in self.active_processes:
             msg = Message(self, process, Actions.START, process.t0)
             self.send(msg)
-
-class Logger(Process):
-    def __init__(self):
-        super().__init__()
-        self.mailbox = ControllerMailbox() # This could share code with controller
-        self.log = None
-    
-    def execute(self):
-        while self.next_msg:
-           self.process_message(self.next_msg)
-           self.next_msg = None
-           self.check_inbox() # This could share code with controller
-    
-    def initialize(self):
-        # Pre-allocate arrays 
-   
-    def pull(self):
-        # Log the data
-    
-    def process_message(self, msg):
-        match msg.action:
-            case Actions.START:
-                print(f'{self.name}: Got start message')
-                self.initialize()  
-
-            case Actions.PULL:
-                print(f'{self.name} is logging data from {msg.sender.name} valid at {msg.timestamp}')
-                ...
-                #self.pull(msg.output)
-
-            case Actions.SIM_COMPLETE:
-                print(f'{msg.receiver.name}: Notified that {msg.sender.name} is done!')
-                self.mailbox.remove_process(msg.sender)
-                # Terminate code. Need another check here if logging from multiple
-                self.finish()
-                msg = Message(self, self.controller, Actions.SIM_COMPLETE, self.get_timestamp())
-                self.send(msg)
-
-            case _:
-                raise ValueError(f'{self.name:} I dont know what to do with this message')

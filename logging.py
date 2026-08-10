@@ -1,5 +1,6 @@
 from processes import Process
 from messaging import ControllerMailbox
+from math import ceil
 
 class Logger(Process):
     def __init__(self):
@@ -11,7 +12,7 @@ class Logger(Process):
         self.index = 0
         self.state_log  = None
         self.output_log = None
-        self.time = None
+        self.time_log = None
     
     def execute(self):
         while self.next_msg:
@@ -21,16 +22,17 @@ class Logger(Process):
     
     def initialize(self):
         # Pre-allocate arrays 
-        self.state_log = [None] * self.
-        self.output_log = [None] * self.
-        self.time = [None] * self.
+        n = ceil((self.process.tf - self.process.t0) * self.process.frequency)
+        self.state_log = [None] * n
+        self.output_log = [None] * n
+        self.time_log = [None] * n
    
     def log(self, data: deque):
         while data:
             (state, output, time) = data.popleft()
             self.state_log[self.index] = state
             self.output_log[self.index] = output
-            self.time[self.index] = time
+            self.time_log[self.index] = time
             self.index += 1
     
     def process_message(self, msg):

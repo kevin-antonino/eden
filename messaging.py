@@ -2,11 +2,13 @@ from collections import deque
 from dataclasses import dataclass
 from queue import PriorityQueue
 from enum import Enum, auto
+from typing import Any
 
 class Actions(Enum):
     START           = auto()
     TERMINATE       = auto()
-    PULL            = auto() 
+    PULL_OUTPUT     = auto() 
+    LOG             = auto()
     INIT_COMPLETE   = auto()
     SIM_COMPLETE    = auto()
 
@@ -15,7 +17,8 @@ class Message:
     sender: "Process"
     receiver: "Process"
     action: Actions 
-    timestamp: float = 0
+    timestamp: float 
+    payload: Any = None
 
 class Mailbox():
     def __init__(self):
@@ -50,8 +53,8 @@ class Mailbox():
 
         return next_msg
 
-    def remove_process(self, p):
-        self.links.pop(p)
+    def disconnect_sender(self, sender):
+        self.links.pop(sender)
    
     def add_sender(self, sender):
         self.links[sender] = deque()
