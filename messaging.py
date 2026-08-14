@@ -58,6 +58,9 @@ class Mailbox():
    
     def add_sender(self, sender):
         self.links[sender] = deque()
+    
+    def get_senders(self):
+        return self.links.keys()
 
     def get_outbox(self):
         return self.outbox

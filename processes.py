@@ -1,6 +1,7 @@
 from collections import deque
 from abc import ABC, abstractmethod
 from copy import copy
+from math import ceil
 from messaging import *
 
 class Process(ABC):
@@ -38,7 +39,6 @@ class Process(ABC):
     def link_to(self, p):
         print(f'{self.name} is now linked to {p.name}')
         self.mailbox.add_sender(p)
-
 
 class PhysicalProcess(Process):
     def __init__(self):
@@ -81,7 +81,7 @@ class PhysicalProcess(Process):
 
     def evolve(self):
         # Update internal state by dt
-        print(f'{self.name}: Evolving from {self.get_timestamp()} to {self.get_timestamp() + 1/self.frequency}')
+        print(f'{self.name}: Evolving from {self.get_timestamp()} to {self.get_next_timestamp()}')
 
     def increment_time(self):
         self.tick += 1
@@ -134,11 +134,13 @@ class PhysicalProcess(Process):
                 self.finish()
                 if self.logger:
                     self.flush_log()
-                msg = Message(self, self.controller, Actions.SIM_COMPLETE, self.get_timestamp())
-                self.send(msg)
+                    msg = Message(self, self.logger, Actions.SIM_COMPLETE, self.get_timestamp())
+                    self.send(msg)
                 for pr in self.output_processes:
                     msg = Message(self, pr, Actions.SIM_COMPLETE, self.get_timestamp())
                     self.send(msg)
+                msg = Message(self, self.controller, Actions.SIM_COMPLETE, self.get_timestamp())
+                self.send(msg)
 
             case Actions.SIM_COMPLETE:
                 print(f'{msg.receiver.name}: Notified that {msg.sender.name} is done!')
@@ -149,7 +151,6 @@ class PhysicalProcess(Process):
 
     def initialize(self):
         print(f'{self.name} is initializing...')
-        pass 
     
     def log(self):
         self.log_buffer.append((self.state, self.output, self.get_timestamp()))
@@ -210,3 +211,60 @@ class Controller(Process):
         for process in self.active_processes:
             msg = Message(self, process, Actions.START, process.t0)
             self.send(msg)
+
+class Logger(Process):
+    def __init__(self):
+        super().__init__()
+        ## Fix these later
+        self.channels = None
+        self.name = 'logger'
+        self.t0 = 0
+
+        ## Logging contents. Perhaps move to a separate class
+        self.index = 0
+        self.state_log  = None
+        self.output_log = None
+        self.time_log = None
+    
+    def initialize(self):
+        self.channels = [process for process in self.mailbox.get_senders() if process is not self.controller] 
+        process = self.channels[0] # Will break for multi channel
+        # Pre-allocate arrays 
+        n = ceil((process.tf - process.t0) * process.frequency)
+        self.state_log = [None]*n
+        self.output_log = [None]*n
+        self.time_log = [None]*n
+   
+    def log(self, data: deque):
+        while data:
+            (state, output, time) = data.popleft()
+            self.state_log[self.index] = state
+            self.output_log[self.index] = output
+            self.time_log[self.index] = time
+            self.index += 1
+    
+    def process_message(self, msg):
+        match msg.action:
+            case Actions.START:
+                print(f'{self.name}: Got start message')
+                self.initialize()  
+
+            case Actions.LOG:
+                print(f'{self.name} is logging data from {msg.sender.name} valid at {msg.timestamp}')
+                self.log(msg.payload)
+
+            case Actions.SIM_COMPLETE:
+                print(f'{msg.receiver.name}: Notified that {msg.sender.name} is done!')
+                self.mailbox.disconnect_sender(msg.sender)
+                self.channels.remove(msg.sender)
+                if not self.channels:
+                    self.finish()
+                    msg = Message(self, self.controller, Actions.SIM_COMPLETE, msg.timestamp)
+                    self.send(msg)
+
+            case _:
+                raise ValueError(f'{self.name:} I dont know what to do with this message')
+
+    def listen_to(self, p: PhysicalProcess):
+        self.link_to(p)
+        p.logger = self
