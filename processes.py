@@ -3,6 +3,8 @@ from abc import ABC, abstractmethod
 from copy import copy
 from math import ceil
 from messaging import *
+from plotting import plot_trajectory
+from numpy import concatenate
 
 class Process(ABC):
     TIME_TOL = 0.001
@@ -125,6 +127,7 @@ class PhysicalProcess(Process):
             case Actions.START:
                 print(f'{self.name}: Opened Begin message. Starting at {self.get_timestamp()}')
                 self.initialize()
+                self.log()
                 # Tell Controller init is done
                 msg = Message(self, self.controller, Actions.INIT_COMPLETE, self.get_timestamp())
                 self.send(msg)
@@ -230,7 +233,7 @@ class Logger(Process):
         self.channels = [process for process in self.mailbox.get_senders() if process is not self.controller] 
         process = self.channels[0] # Will break for multi channel
         # Pre-allocate arrays 
-        n = ceil((process.tf - process.t0) * process.frequency)
+        n = ceil((process.tf - process.t0) * process.frequency + 1)
         self.state_log = [None]*n
         self.output_log = [None]*n
         self.time_log = [None]*n
@@ -268,3 +271,8 @@ class Logger(Process):
     def listen_to(self, p: PhysicalProcess):
         self.link_to(p)
         p.logger = self
+
+    def plot_state(self):
+        # assuming state is a numpy array...
+        state_trajectory = concatenate(self.state_log, axis=1)
+        plot_trajectory(state_trajectory, self.time_log, 'x')
