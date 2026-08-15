@@ -3,6 +3,7 @@ from dataclasses import dataclass
 from queue import PriorityQueue
 from enum import Enum, auto
 from typing import Any
+from abc import ABC, abstractmethod
 
 class Actions(Enum):
     START           = auto()
@@ -20,65 +21,73 @@ class Message:
     timestamp: float 
     payload: Any = None
 
+class Scheduler(ABC):
+    def __init__(self):
+        pass
+
+    @abstractmethod
+    def unlock(self, inbox):
+        ...
+
+class ConservativeScheduler(Scheduler):
+    def unlock(self, inbox):
+        if all(inbox.values()): # If there is a message waiting from all LPs
+            return True
+        else:
+            return False
+
+class NullScheduler(Scheduler):
+    def unlock(self, inbox):
+        if any(inbox.values()): # If there is a message waiting 
+            return True
+        else:
+            return False
+
 class Mailbox():
     def __init__(self):
-        self.links: dict["Process", deque] = {}
-        self.inbox = PriorityQueue()
+        self.inbox: dict["Process", deque] = {}
         self.outbox = deque()
+        self.head =  PriorityQueue()
         self.count = 0
 
-    def receive_message(self, msg: Message):
-        if msg.sender not in self.links:
+    def put(self, msg: Message):
+        if msg.sender not in self.inbox:
             raise ValueError(f'{msg.sender.name} not in {msg.receiver.name}\'s inbox!') 
 
-        if not self.links[msg.sender]:
-            self.inbox.put((msg.timestamp, self.count, msg))
+        if not self.inbox[msg.sender]: # No msgs waiting for this LP => update head
+            self.head.put((msg.timestamp, self.count, msg))
             self.count += 1
 
-        self.links[msg.sender].append(msg)
+        self.inbox[msg.sender].append(msg)
+    
+    def pop(self): 
+        # Remove and return current earliest message 
+        _, _, top_msg = self.head.get()
+        self.inbox[top_msg.sender].popleft()
+        # Update head if there are messages waiting
+        msg_queue = self.inbox[top_msg.sender]
+        if msg_queue:
+            self.head.put((msg_queue[0].timestamp, self.count, msg_queue[0]))
+            self.count += 1
+        return top_msg
 
-    def add_to_outbox(self, msg):
+    def put_in_outbox(self, msg):
         self.outbox.append(msg)
 
-    def get_next_message(self):
-        next_msg = None
-        if not self.inbox.empty() and self.inbox.qsize() == len(self.links.keys()):
-            _, _, next_msg = self.inbox.get()
-            msg = self.links[next_msg.sender].popleft()
-            # If there is another message in the queue, put it into the inbox
-            queue = self.links[next_msg.sender]
-            if queue:
-                self.inbox.put((queue[0].timestamp, self.count, queue[0]))
-                self.count += 1
-
-        return next_msg
-
     def disconnect_sender(self, sender):
-        self.links.pop(sender)
+        self.inbox.pop(sender)
    
-    def add_sender(self, sender):
-        self.links[sender] = deque()
+    def connect_sender(self, sender):
+        self.inbox[sender] = deque()
     
     def get_senders(self):
-        return self.links.keys()
+        return self.inbox.keys()
+    
+    def get_inbox(self):
+        return self.inbox
 
     def get_outbox(self):
         return self.outbox
-
-class ControllerMailbox(Mailbox):
-    def __init__(self):
-        super().__init__()
-
-    def receive_message(self, msg: Message):
-        self.inbox.put((msg.timestamp, self.count, msg)) # FIFO deque may be best
-        self.count += 1
-
-    def get_next_message(self):
-        next_msg = None
-        if not self.inbox.empty():
-            _, _, next_msg = self.inbox.get()
-
-        return next_msg
 
 class PostalService():
     def __init__(self):
@@ -92,5 +101,5 @@ class PostalService():
             msg_queue = mb.get_outbox()
             while msg_queue:
                 msg = msg_queue.popleft()
-                self.mailboxes[msg.receiver].receive_message(msg)
+                self.mailboxes[msg.receiver].put(msg)
                 print(f'{msg.sender.name} is sending {msg.action} message to {msg.receiver.name} at {msg.timestamp}')
