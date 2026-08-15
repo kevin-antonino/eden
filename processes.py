@@ -13,13 +13,6 @@ class Process(ABC):
         self.scheduler = NullScheduler() 
         self.mailbox = Mailbox()
 
-    @abstractmethod
-    def process_message(self, msg):
-        pass
-
-    def propagate_to(self, time):
-        pass
-
     def execute(self):
         if self.scheduler.unlock(self.mailbox.get_inbox()):
             next_msg = self.mailbox.pop()
@@ -29,15 +22,22 @@ class Process(ABC):
     def send(self, msg):
         self.mailbox.put_in_outbox(msg)
 
-    def finish(self):
+    def link_to(self, p):
+        print(f'{self.name} is now linked to {p.name}')
+        self.mailbox.connect_sender(p)
+
+    @abstractmethod
+    def process_message(self, msg):
+        pass
+
+    def propagate_to(self, time):
         pass
 
     def initialize(self):
         print(f'{self.name} is initializing...')
 
-    def link_to(self, p):
-        print(f'{self.name} is now linked to {p.name}')
-        self.mailbox.connect_sender(p)
+    def finish(self):
+        pass
 
 class PhysicalProcess(Process):
     def __init__(self):

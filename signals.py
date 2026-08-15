@@ -1,5 +1,4 @@
 from processes import PhysicalProcess:
-from abc import abstractmethod
 
 class Impulse(PhysicalProcess):
     def __init__(self, t1: float = 0, name: str ='n/a'):
