@@ -21,10 +21,8 @@ class Simulation():
         self.initialize()
         queue = self.controller.get_queue()
         while queue:
-            self.controller.check_inbox()
             self.controller.execute()
             for process in queue:
-                process.check_inbox()
                 process.execute()
             
             self.service.deliver()

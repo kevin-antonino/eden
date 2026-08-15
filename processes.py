@@ -10,42 +10,39 @@ class Process(ABC):
     TIME_TOL = 0.001
     def __init__(self):
         self.name = ''
-        
-        ## Communication ## 
-        self.mailbox = ControllerMailbox()
-        self.next_msg = None
+        self.scheduler = NullScheduler() 
+        self.mailbox = Mailbox()
 
     @abstractmethod
     def process_message(self, msg):
         pass
 
-    def execute(self):
-        while self.next_msg:
-           self.process_message(self.next_msg)
-           self.next_msg = None
-           self.check_inbox()
+    def propagate_to(self, time):
+        pass
 
-    def check_inbox(self):
-        if not self.next_msg:
-            self.next_msg = self.mailbox.get_next_message()
+    def execute(self):
+        if self.scheduler.unlock(self.mailbox.get_inbox()):
+            next_msg = self.mailbox.pop()
+            self.propagate_to(next_msg.timestamp)
+            self.process_message(next_msg)
 
     def send(self, msg):
-        self.mailbox.add_to_outbox(msg)
+        self.mailbox.put_in_outbox(msg)
 
     def finish(self):
         pass
 
     def initialize(self):
-        pass
+        print(f'{self.name} is initializing...')
 
     def link_to(self, p):
         print(f'{self.name} is now linked to {p.name}')
-        self.mailbox.add_sender(p)
+        self.mailbox.connect_sender(p)
 
 class PhysicalProcess(Process):
     def __init__(self):
         super().__init__()
-        self.mailbox = Mailbox()
+        self.scheduler = ConservativeScheduler()
 
         ## State & I/O ##
         self.state  = None
@@ -61,25 +58,11 @@ class PhysicalProcess(Process):
         ## Communication ## 
         self.output_processes = set() # Set of subscribers to be notified when this process evolves
         self.controller = None
+        self.logger = None
 
         ## Logging ##
-        self.logger = None
         self.batch_size = 1000
         self.log_buffer = deque()
-
-    def execute(self):
-        if  self.next_msg:
-            prop_time = self.find_propagation_time()
-            self.propagate_to(prop_time)
-            
-            # if close to next message, read it
-            if abs(prop_time - self.next_msg.timestamp) < self.TIME_TOL:
-                self.process_message(self.next_msg)
-                self.next_msg = None
-                self.check_inbox()
-        else:
-            #print(f'{self.name} is stuck')
-            ...
 
     def evolve(self):
         # Update internal state by dt
@@ -87,16 +70,6 @@ class PhysicalProcess(Process):
 
     def increment_time(self):
         self.tick += 1
-
-    def find_propagation_time(self):
-        prop_time = self.get_timestamp()
-        if self.next_msg:
-            prop_time = self.next_msg.timestamp
-            for p in self.output_processes: 
-                if p.get_next_timestamp() < prop_time:
-                    prop_time = p.get_next_timestamp()
-
-        return prop_time
 
     def propagate_to(self, prop_time):
         while self.get_timestamp() < prop_time:
@@ -152,9 +125,6 @@ class PhysicalProcess(Process):
             case _:
                 raise ValueError(f'{self.name:} I dont know what to do with this message')
 
-    def initialize(self):
-        print(f'{self.name} is initializing...')
-    
     def log(self):
         self.log_buffer.append((self.state, self.output, self.get_timestamp()))
         if len(self.log_buffer) == self.batch_size:
