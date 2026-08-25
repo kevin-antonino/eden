@@ -12,12 +12,31 @@ class Process(ABC):
         self.name = ''
         self.scheduler = NullScheduler() 
         self.mailbox = Mailbox()
+        self.node = TreeNode()
 
     def execute(self):
         if self.scheduler.unlock(self.mailbox.get_inbox()):
             next_msg = self.mailbox.pop()
+
+            if not self.node.in_tree():
+                self.grow_tree(next_msg)
+
             self.propagate_to(next_msg.timestamp)
             self.process_message(next_msg)
+        else:
+
+            if not self.node.get_descendants():
+                self.trim_tree()
+    
+    def grow_tree(self, new_message):
+        self.node.join_tree(new_message.sender)
+        msg = Message(self, new_message.sender, Actions.NEW_NODE, self.node)
+        self.send(msg)
+    
+    def trim_tree(self):
+        msg = Message(self, self.node.get_ancestor(), Actions.KILL_NODE, self.node)
+        self.send(msg)
+        self.node.leave_tree()
 
     def send(self, msg):
         self.mailbox.put_in_outbox(msg)
@@ -79,7 +98,7 @@ class PhysicalProcess(Process):
                 self.log()
             self.notify_output_processes()
 
-    def notify_output_processes(self):
+    def notify_output_processes(self): # Ideally move this to postal service or something. Not safe to assume this process has latest timestamps
         for process in self.output_processes:
             # Primary causality constraint 
             if self.get_timestamp() - process.get_next_timestamp() < self.TIME_TOL:
@@ -91,8 +110,14 @@ class PhysicalProcess(Process):
     def process_message(self, msg):
         if self.get_timestamp() < msg.timestamp:
             raise ValueError(f'{self.name:} Attempting to process message in future')
-        
+
         match msg.action:
+            case Actions.NEW_NODE:
+                self.node.add_descendant(msg.payload)
+
+            case Actions.KILL_NODE:
+                self.node.remove_descendant(msg.payload)
+
             case Actions.PULL_OUTPUT:
                 print(f'{self.name} is pulling input from {msg.sender.name} valid at {msg.timestamp}')
                 self.input = msg.payload
@@ -121,6 +146,9 @@ class PhysicalProcess(Process):
             case Actions.SIM_COMPLETE:
                 print(f'{msg.receiver.name}: Notified that {msg.sender.name} is done!')
                 self.mailbox.disconnect_sender(msg.sender)
+
+            case Actions.SIGNAL:
+                self.detector.decrement()
 
             case _:
                 raise ValueError(f'{self.name:} I dont know what to do with this message')
@@ -158,6 +186,14 @@ class Controller(Process):
 
     def process_message(self, msg):
         match msg.action:
+            case Actions.NEW_NODE:
+                self.node.add_descendant(msg.payload)
+
+            case Actions.KILL_NODE:
+                self.node.remove_descendant(msg.payload)
+                if not self.node.get_descendants():
+                    print(f'Deadlock Detected!')
+
             case Actions.INIT_COMPLETE:
                 msg = Message(self, msg.sender, Actions.TERMINATE, msg.sender.tf)
                 self.send(msg)
@@ -246,3 +282,4 @@ class Logger(Process):
         # assuming state is a numpy array...
         state_trajectory = concatenate(self.state_log, axis=1)
         plot_trajectory(state_trajectory, self.time_log, 'x')
+
