@@ -4,7 +4,7 @@ import matplotlib.pyplot as plt
 
 @dataclass
 class PlotConfig:
-    ticks: Dict[str, Any] = field(default_factory=lambda: {
+    ticks: dict[str, any] = field(default_factory=lambda: {
         'axis': 'both',
         'which': 'major',
         'direction': 'in',
@@ -12,7 +12,7 @@ class PlotConfig:
         'width': 2,
         'colors': 'black'
     })
-    grid: Dict[str, Any] = field(default_factory=lambda: {
+    grid: dict[str, any] = field(default_factory=lambda: {
         'visible': True,
         'which': 'major',
         'axis': 'both',
@@ -39,8 +39,8 @@ def plot_trajectory(traj, time, label):
     fig.patch.set_facecolor('lightgray')
     plt.show()
 
-def plot_on_ax(ax: matplotlib.axes.Axes, 
-    x: ndarray, y: ndarray, title: str = '', 
+def plot_on_ax(ax: plt.Axes, 
+    x: np.ndarray, y: np.ndarray, title: str = '', 
     ylabel: str='', xlabel: str='') -> None:
 
     cfg = PlotConfig()

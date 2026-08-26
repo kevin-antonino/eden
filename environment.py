@@ -7,6 +7,7 @@ class Simulation():
         self.service = PostalService()
 
     def initialize(self):
+        print('SIM IS INITIALIZING')
         for p in self.processes:
             p.controller = self.controller
             self.service.register(p) 
@@ -16,13 +17,17 @@ class Simulation():
 
         self.service.register(self.controller)
         self.controller.initialize()
+        print('SIM WILL BEGIN')
 
     def start(self):
         self.initialize()
+        self.service.deliver() # Deliver all init messages
         queue = self.controller.get_queue()
         while queue:
+            print('Controller executing...')
             self.controller.execute()
             for process in queue:
+                print(f'{process.name} executing...')
                 process.execute()
             
             self.service.deliver()

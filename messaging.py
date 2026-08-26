@@ -12,6 +12,8 @@ class Actions(Enum):
     LOG             = auto()
     INIT_COMPLETE   = auto()
     SIM_COMPLETE    = auto()
+    KILL_NODE       = auto()
+    NEW_NODE        = auto()
 
 @dataclass(frozen=True)
 class Message:
@@ -20,6 +22,14 @@ class Message:
     action: Actions 
     timestamp: float 
     payload: Any = None
+
+@dataclass(frozen=True)
+class Signal:
+    sender: "Process"
+    receiver: "Process"
+    action: Actions
+    timestamp: float 
+    payload: "TreeNode" = None
 
 class Scheduler(ABC):
     def __init__(self):
@@ -43,33 +53,11 @@ class NullScheduler(Scheduler):
         else:
             return False
 
-class DeadlockDetector():
-    def __init__(self):
-        self.n_descendants = 0
-        self.n_msgs_left = 0
-
-    def engaged(self):
-        if self.n_descendants > 0:
-            return True
-        else 
-            return False
-
-    def signal_sent(self):
-        self.n_msgs_left -= 1
-
-    def message_received(self):
-        self.n_msgs_left += 1 
-
-    def message_sent(self):
-        self.n_descendants += 1
-
-    def signal_received(self):
-        self.n_descendants -= 1 
-
 class TreeNode():
-    def __init__(self):
-        self.ancestor = None
-        self.descendants = set() # descendant processes in tree
+    def __init__(self, p):
+        self.ancestor = None 
+        self.process = p # address to process
+        self.descendants = set() # descendant nodes in tree
 
     def add_descendant(self, node): # Maybe do root/leaf terminology 
         if self in node.get_descendants():
@@ -77,17 +65,10 @@ class TreeNode():
         else:
             self.descendants.add(node)
 
-    def set_ancestor(self, node):
-        if self == node.get_ancestor():
-            raise ValueError('Attempting to add make a descendant an ancestor!')
-        else:
-            self.ancestor = node
-
-    def join_tree(self, ancestor: Process):
-        node = ancestor.get_node()
+    def join_tree(self, ancestor_node: "TreeNode"):
         if self.ancestor: 
             raise ValueError('Node already in tree!')
-        self.ancestor = node
+        self.ancestor = ancestor_node
 
     def leave_tree(self):
         if self.descendants:
@@ -108,6 +89,9 @@ class TreeNode():
     
     def remove_descendant(self, node):
         self.descendants.remove(node)
+
+    def get_process(self):
+        return self.process
 
 class Mailbox():
     def __init__(self):

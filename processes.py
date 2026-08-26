@@ -12,9 +12,12 @@ class Process(ABC):
         self.name = ''
         self.scheduler = NullScheduler() 
         self.mailbox = Mailbox()
-        self.node = TreeNode()
+        self.node = TreeNode(self)
 
     def execute(self):
+        if signal:
+            self.process_signal(signal)
+
         if self.scheduler.unlock(self.mailbox.get_inbox()):
             next_msg = self.mailbox.pop()
 
@@ -25,29 +28,46 @@ class Process(ABC):
             self.process_message(next_msg)
         else:
 
-            if not self.node.get_descendants():
+            if self.node.in_tree() and not self.node.get_descendants():
                 self.trim_tree()
     
     def grow_tree(self, new_message):
-        self.node.join_tree(new_message.sender)
-        msg = Message(self, new_message.sender, Actions.NEW_NODE, self.node)
+        print(f'{self.name}: Becoming engaged, ancestor is {new_message.sender.name}')
+        ancestor_node = new_message.sender.get_node()
+        self.node.join_tree(ancestor_node)
+        msg = Signal(self, new_message.sender, Actions.NEW_NODE, self.get_timestamp(), self.node)
         self.send(msg)
     
     def trim_tree(self):
-        msg = Message(self, self.node.get_ancestor(), Actions.KILL_NODE, self.node)
+        print(f'{self.name}: Becoming disengaged at {self.get_timestamp()}')
+        ancestor_node = self.node.get_ancestor()
+        msg = Signal(self, ancestor_node.get_process(), Actions.KILL_NODE, self.get_timestamp(), self.node)
         self.send(msg)
         self.node.leave_tree()
 
     def send(self, msg):
-        self.mailbox.put_in_outbox(msg)
+        self.mailbox.push_to_outbox(msg)
 
     def link_to(self, p):
         print(f'{self.name} is now linked to {p.name}')
         self.mailbox.connect_sender(p)
 
+    def get_node(self):
+        return self.node
+
     @abstractmethod
     def process_message(self, msg):
         pass
+
+    def process_signal(self, msg):
+        match msg.action:
+            case Actions.NEW_NODE:
+                print(f'{self.name}: Adding {msg.payload.get_process().name} as a descendent')
+                self.node.add_descendant(msg.payload)
+
+            case Actions.KILL_NODE:
+                print(f'{self.name}: Removing {msg.payload.get_process().name} as a descendent')
+                self.node.remove_descendant(msg.payload)
 
     def propagate_to(self, time):
         pass
@@ -113,9 +133,11 @@ class PhysicalProcess(Process):
 
         match msg.action:
             case Actions.NEW_NODE:
+                print(f'{self.name}: Adding {msg.payload.get_process().name} as a descendent')
                 self.node.add_descendant(msg.payload)
 
             case Actions.KILL_NODE:
+                print(f'{self.name}: Removing {msg.payload.get_process().name} as a descendent')
                 self.node.remove_descendant(msg.payload)
 
             case Actions.PULL_OUTPUT:
@@ -187,9 +209,11 @@ class Controller(Process):
     def process_message(self, msg):
         match msg.action:
             case Actions.NEW_NODE:
+                print(f'{self.name}: Adding {msg.payload.get_process().name} as a descendent')
                 self.node.add_descendant(msg.payload)
 
             case Actions.KILL_NODE:
+                print(f'{self.name}: Removing {msg.payload.get_process().name} as a descendent')
                 self.node.remove_descendant(msg.payload)
                 if not self.node.get_descendants():
                     print(f'Deadlock Detected!')
@@ -217,7 +241,9 @@ class Controller(Process):
 
     def initialize(self):
         print(f'{self.name}: is initializing...')
+        self.node.join_tree(self)
         for process in self.active_processes:
+            self.node.add_descendant(process.get_node())
             msg = Message(self, process, Actions.START, process.t0)
             self.send(msg)
 
