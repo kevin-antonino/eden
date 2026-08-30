@@ -15,33 +15,43 @@ class Process(ABC):
         self.node = TreeNode(self)
 
     def execute(self):
-        if signal:
-            self.process_signal(signal)
+        self.flush_signals()
 
         if self.scheduler.unlock(self.mailbox.get_inbox()):
-            next_msg = self.mailbox.pop()
-
-            if not self.node.in_tree():
-                self.grow_tree(next_msg)
-
-            self.propagate_to(next_msg.timestamp)
-            self.process_message(next_msg)
+            self.perform_next_event()
         else:
+            self.check_if_blocked()
+   
+    def perform_next_event(self):
+        next_event = self.mailbox.pop_event()
 
-            if self.node.in_tree() and not self.node.get_descendants():
-                self.trim_tree()
-    
+        if not self.node.in_tree():
+            self.grow_tree(next_event)
+
+        self.propagate_to(next_event.timestamp)
+        self.process_event(next_event)
+
+    def check_if_blocked(self):
+        if self.node.in_tree() and not self.node.get_descendants():
+            self.trim_tree()
+
+    def flush_signals(self):
+        next_signal = self.mailbox.pop_signal()
+        while next_signal:
+            self.process_signal(next_signal)
+            next_signal = self.mailbox.pop_signal()
+
     def grow_tree(self, new_message):
         print(f'{self.name}: Becoming engaged, ancestor is {new_message.sender.name}')
         ancestor_node = new_message.sender.get_node()
         self.node.join_tree(ancestor_node)
-        msg = Signal(self, new_message.sender, Actions.NEW_NODE, self.get_timestamp(), self.node)
+        msg = Signal(self, new_message.sender, SignalActions.NEW_NODE, self.node)
         self.send(msg)
     
     def trim_tree(self):
         print(f'{self.name}: Becoming disengaged at {self.get_timestamp()}')
         ancestor_node = self.node.get_ancestor()
-        msg = Signal(self, ancestor_node.get_process(), Actions.KILL_NODE, self.get_timestamp(), self.node)
+        msg = Signal(self, ancestor_node.get_process(), SignalActions.KILL_NODE, self.node)
         self.send(msg)
         self.node.leave_tree()
 
@@ -55,17 +65,14 @@ class Process(ABC):
     def get_node(self):
         return self.node
 
-    @abstractmethod
-    def process_message(self, msg):
-        pass
-
     def process_signal(self, msg):
         match msg.action:
-            case Actions.NEW_NODE:
+
+            case SignalActions.NEW_NODE:
                 print(f'{self.name}: Adding {msg.payload.get_process().name} as a descendent')
                 self.node.add_descendant(msg.payload)
 
-            case Actions.KILL_NODE:
+            case SignalActions.KILL_NODE:
                 print(f'{self.name}: Removing {msg.payload.get_process().name} as a descendent')
                 self.node.remove_descendant(msg.payload)
 
@@ -124,53 +131,39 @@ class PhysicalProcess(Process):
             if self.get_timestamp() - process.get_next_timestamp() < self.TIME_TOL:
                 # Only send messages when you need to
                 if self.get_next_timestamp() - process.get_next_timestamp() > self.TIME_TOL:
-                    msg = Message(self, process, Actions.PULL_OUTPUT, self.get_timestamp(), self.output)
+                    msg = Event(self, process, EventActions.PULL_OUTPUT, self.get_timestamp(), self.output)
                     self.send(msg)
 
-    def process_message(self, msg):
+    def process_event(self, msg):
         if self.get_timestamp() < msg.timestamp:
             raise ValueError(f'{self.name:} Attempting to process message in future')
 
         match msg.action:
-            case Actions.NEW_NODE:
-                print(f'{self.name}: Adding {msg.payload.get_process().name} as a descendent')
-                self.node.add_descendant(msg.payload)
-
-            case Actions.KILL_NODE:
-                print(f'{self.name}: Removing {msg.payload.get_process().name} as a descendent')
-                self.node.remove_descendant(msg.payload)
-
-            case Actions.PULL_OUTPUT:
+            case EventActions.PULL_OUTPUT:
                 print(f'{self.name} is pulling input from {msg.sender.name} valid at {msg.timestamp}')
                 self.input = msg.payload
 
-            case Actions.START:
+            case EventActions.START:
                 print(f'{self.name}: Opened Begin message. Starting at {self.get_timestamp()}')
                 self.initialize()
                 self.log()
-                # Tell Controller init is done
-                msg = Message(self, self.controller, Actions.INIT_COMPLETE, self.get_timestamp())
-                self.send(msg)
             
-            case Actions.TERMINATE:
+            case EventActions.TERMINATE:
                 print(f'{self.name}: End message Received. {self.name} is Done!')
                 self.finish()
                 if self.logger:
                     self.flush_log()
-                    msg = Message(self, self.logger, Actions.SIM_COMPLETE, self.get_timestamp())
+                    msg = Event(self, self.logger, EventActions.SIM_COMPLETE, self.get_timestamp())
                     self.send(msg)
                 for pr in self.output_processes:
-                    msg = Message(self, pr, Actions.SIM_COMPLETE, self.get_timestamp())
+                    msg = Event(self, pr, EventActions.SIM_COMPLETE, self.get_timestamp())
                     self.send(msg)
-                msg = Message(self, self.controller, Actions.SIM_COMPLETE, self.get_timestamp())
+                msg = Event(self, self.controller, EventActions.SIM_COMPLETE, self.get_timestamp())
                 self.send(msg)
 
-            case Actions.SIM_COMPLETE:
+            case EventActions.SIM_COMPLETE:
                 print(f'{msg.receiver.name}: Notified that {msg.sender.name} is done!')
                 self.mailbox.disconnect_sender(msg.sender)
-
-            case Actions.SIGNAL:
-                self.detector.decrement()
 
             case _:
                 raise ValueError(f'{self.name:} I dont know what to do with this message')
@@ -181,7 +174,7 @@ class PhysicalProcess(Process):
             self.flush_log()
 
     def flush_log(self):
-        msg = Message(self, self.logger, Actions.LOG, self.get_timestamp(), self.log_buffer) # buffer has to be a shallow copy!
+        msg = Signal(self, self.logger, SignalActions.LOG, self.log_buffer) # buffer has to be a shallow copy!
         self.log_buffer = deque()
         self.send(msg)
 
@@ -206,28 +199,28 @@ class Controller(Process):
         self.name = 'Controller'
         self.active_processes = set()
 
-    def process_message(self, msg):
+    def process_event(self, msg):
         match msg.action:
-            case Actions.NEW_NODE:
-                print(f'{self.name}: Adding {msg.payload.get_process().name} as a descendent')
-                self.node.add_descendant(msg.payload)
-
-            case Actions.KILL_NODE:
-                print(f'{self.name}: Removing {msg.payload.get_process().name} as a descendent')
-                self.node.remove_descendant(msg.payload)
-                if not self.node.get_descendants():
-                    print(f'Deadlock Detected!')
-
-            case Actions.INIT_COMPLETE:
-                msg = Message(self, msg.sender, Actions.TERMINATE, msg.sender.tf)
-                self.send(msg)
-
-            case Actions.SIM_COMPLETE:
+            case EventActions.SIM_COMPLETE:
                 print(f'{self.name}: Notified that {msg.sender.name} is done!')
                 self.mailbox.disconnect_sender(msg.sender)
                 self.active_processes.remove(msg.sender)
                 if not self.active_processes:
                     self.finish()
+            case _:
+                raise ValueError(f'{self.name:} I dont know what to do with this message')
+
+    def process_signal(self, msg):
+        match msg.action:
+            case SignalActions.NEW_NODE:
+                print(f'{self.name}: Adding {msg.payload.get_process().name} as a descendent')
+                self.node.add_descendant(msg.payload)
+
+            case SignalActions.KILL_NODE:
+                print(f'{self.name}: Removing {msg.payload.get_process().name} as a descendent')
+                self.node.remove_descendant(msg.payload)
+                if not self.node.get_descendants():
+                    print(f'Deadlock Detected!')
 
             case _:
                 raise ValueError(f'{self.name:} I dont know what to do with this message')
@@ -244,7 +237,9 @@ class Controller(Process):
         self.node.join_tree(self)
         for process in self.active_processes:
             self.node.add_descendant(process.get_node())
-            msg = Message(self, process, Actions.START, process.t0)
+            msg = Event(self, process, EventActions.START, process.t0)
+            self.send(msg)
+            msg = Event(self, process, EventActions.TERMINATE, process.tf)
             self.send(msg)
 
 class Logger(Process):
@@ -278,24 +273,26 @@ class Logger(Process):
             self.time_log[self.index] = time
             self.index += 1
     
-    def process_message(self, msg):
+    def process_event(self, msg):
         match msg.action:
-            case Actions.START:
+            case EventActions.START:
                 print(f'{self.name}: Got start message')
                 self.initialize()  
 
-            case Actions.LOG:
-                print(f'{self.name} is logging data from {msg.sender.name} valid at {msg.timestamp}')
-                self.log(msg.payload)
-
-            case Actions.SIM_COMPLETE:
+            case EventActions.SIM_COMPLETE:
                 print(f'{msg.receiver.name}: Notified that {msg.sender.name} is done!')
                 self.mailbox.disconnect_sender(msg.sender)
                 self.channels.remove(msg.sender)
                 if not self.channels:
                     self.finish()
-                    msg = Message(self, self.controller, Actions.SIM_COMPLETE, msg.timestamp)
+                    msg = Event(self, self.controller, Actions.SIM_COMPLETE)
                     self.send(msg)
+
+    def process_signal(self, msg):
+        match msg.action:
+            case Actions.LOG:
+                print(f'{self.name} is logging data from {msg.sender.name} valid at {msg.timestamp}')
+                self.log(msg.payload)
 
             case _:
                 raise ValueError(f'{self.name:} I dont know what to do with this message')

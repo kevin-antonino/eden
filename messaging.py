@@ -5,31 +5,31 @@ from enum import Enum, auto
 from typing import Any
 from abc import ABC, abstractmethod
 
-class Actions(Enum):
+class SignalActions(Enum):
+    KILL_NODE       = auto()
+    NEW_NODE        = auto()
+    LOG             = auto()
+
+class EventActions(Enum):
     START           = auto()
     TERMINATE       = auto()
     PULL_OUTPUT     = auto() 
-    LOG             = auto()
-    INIT_COMPLETE   = auto()
     SIM_COMPLETE    = auto()
-    KILL_NODE       = auto()
-    NEW_NODE        = auto()
-
-@dataclass(frozen=True)
-class Message:
-    sender: "Process"
-    receiver: "Process"
-    action: Actions 
-    timestamp: float 
-    payload: Any = None
 
 @dataclass(frozen=True)
 class Signal:
     sender: "Process"
     receiver: "Process"
-    action: Actions
-    timestamp: float 
+    action: SignalActions
     payload: "TreeNode" = None
+
+@dataclass(frozen=True)
+class Event:
+    sender: "Process"
+    receiver: "Process"
+    action: EventActions
+    timestamp: float 
+    payload: Any = None
 
 class Scheduler(ABC):
     def __init__(self):
@@ -95,12 +95,16 @@ class TreeNode():
 
 class Mailbox():
     def __init__(self):
+        self.signal_queue = deque()
         self.inbox: dict["Process", deque] = {}
         self.outbox = deque()
         self.head =  PriorityQueue()
         self.count = 0
 
-    def push_to_inbox(self, msg: Message):
+    def push_signal(self, msg: Signal):
+        self.signal_queue.append(msg)
+
+    def push_event(self, msg: Event):
         if msg.sender not in self.inbox:
             raise ValueError(f'{msg.sender.name} not in {msg.receiver.name}\'s inbox!') 
 
@@ -113,7 +117,14 @@ class Mailbox():
     def push_to_outbox(self, msg):
         self.outbox.append(msg)
 
-    def pop(self): 
+    def pop_signal(self):
+        signal = None
+        if self.signal_queue:
+            signal = self.signal_queue.popleft()
+
+        return signal
+
+    def pop_event(self): 
         # Remove and return current earliest message 
         _, _, top_msg = self.head.get()
         self.inbox[top_msg.sender].popleft()
@@ -124,7 +135,7 @@ class Mailbox():
             self.count += 1
         return top_msg
 
-    def get_next_timestamp(self):
+    def get_next_event_time(self):
         timestamp, _, _, = self.head.peek()
         return timestamp
 
@@ -155,6 +166,11 @@ class PostalService():
             msg_queue = mb.get_outbox()
             while msg_queue:
                 msg = msg_queue.popleft()
-                self.mailboxes[msg.receiver].push_to_inbox(msg)
-                print(f'{msg.sender.name} is sending {msg.action} message to {msg.receiver.name} at {msg.timestamp}')
+                if isinstance(msg, Event):
+                    self.mailboxes[msg.receiver].push_event(msg)
+                    print(f'{msg.sender.name} is sending {msg.action} message to {msg.receiver.name} at {msg.timestamp}')
+                else:
+                    self.mailboxes[msg.receiver].push_signal(msg)
+                    print(f'{msg.sender.name} is sending {msg.action} message to {msg.receiver.name}')
+
 
