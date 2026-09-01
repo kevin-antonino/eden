@@ -89,7 +89,7 @@ class TreeNode():
         self.ancestor = None
 
     def in_tree(self):
-        if self.ancestor:
+        if self.ancestor or self.descendants:
             return True
         else:
             return False
