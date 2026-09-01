@@ -9,11 +9,14 @@ class SignalActions(Enum):
     KILL_NODE       = auto()
     NEW_NODE        = auto()
     LOG             = auto()
+    UNBLOCK         = auto()
+    EARLIEST_EVENT_REQUEST = auto()
 
 class EventActions(Enum):
     START           = auto()
     TERMINATE       = auto()
-    PULL_OUTPUT     = auto() 
+    DATA_REQUEST    = auto() 
+    DATA_PUSH       = auto()
     SIM_COMPLETE    = auto()
 
 @dataclass(frozen=True)
@@ -21,7 +24,7 @@ class Signal:
     sender: "Process"
     receiver: "Process"
     action: SignalActions
-    payload: "TreeNode" = None
+    payload: Any = None
 
 @dataclass(frozen=True)
 class Event:
@@ -33,21 +36,31 @@ class Event:
 
 class Scheduler(ABC):
     def __init__(self):
-        pass
+        self.bypass: bool = False
+    
+    def unblock(self):
+        self.bypass = True # should be a check if there are events in inbox... consider making inbox a data member (scheduler gets inbox every frame)
+
+    def next_event(self, inbox) -> bool:
+        if self.safe_event(inbox) or self.bypass:
+            self.bypass = False
+            return True
+        else:
+            return False
 
     @abstractmethod
-    def unlock(self, inbox):
+    def safe_event(self, inbox):
         ...
 
 class ConservativeScheduler(Scheduler):
-    def unlock(self, inbox):
+    def safe_event(self, inbox):
         if all(inbox.values()): # If there is a message waiting from all LPs
             return True
         else:
             return False
 
 class NullScheduler(Scheduler):
-    def unlock(self, inbox):
+    def safe_event(self, inbox):
         if any(inbox.values()): # If there is a message waiting 
             return True
         else:
@@ -136,7 +149,7 @@ class Mailbox():
         return top_msg
 
     def get_next_event_time(self):
-        timestamp, _, _, = self.head.peek()
+        timestamp, _, _, = self.head.queue[0]
         return timestamp
 
     def connect_sender(self, sender):

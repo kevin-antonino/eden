@@ -23,13 +23,16 @@ class Simulation():
         self.initialize()
         self.service.deliver() # Deliver all init messages
         queue = self.controller.get_queue()
-        while queue:
+        #while queue:
+        for i in range(1,10):
             print('Controller executing...')
             self.controller.execute()
+            self.service.deliver()
+            queue = self.controller.get_queue()
             for process in queue:
                 print(f'{process.name} executing...')
                 process.execute()
             
-            self.service.deliver()
-            queue = self.controller.get_queue()
+                self.service.deliver()
+                #queue = self.controller.get_queue()
 

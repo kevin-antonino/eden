@@ -16,8 +16,8 @@ class Process(ABC):
 
     def execute(self):
         self.flush_signals()
-
-        if self.scheduler.unlock(self.mailbox.get_inbox()):
+        
+        if self.scheduler.next_event(self.mailbox.get_inbox()):
             self.perform_next_event()
         else:
             self.check_if_blocked()
@@ -49,7 +49,7 @@ class Process(ABC):
         self.send(msg)
     
     def trim_tree(self):
-        print(f'{self.name}: Becoming disengaged at {self.get_timestamp()}')
+        print(f'{self.name}: Becoming disengaged')
         ancestor_node = self.node.get_ancestor()
         msg = Signal(self, ancestor_node.get_process(), SignalActions.KILL_NODE, self.node)
         self.send(msg)
@@ -67,7 +67,6 @@ class Process(ABC):
 
     def process_signal(self, msg):
         match msg.action:
-
             case SignalActions.NEW_NODE:
                 print(f'{self.name}: Adding {msg.payload.get_process().name} as a descendent')
                 self.node.add_descendant(msg.payload)
@@ -75,6 +74,16 @@ class Process(ABC):
             case SignalActions.KILL_NODE:
                 print(f'{self.name}: Removing {msg.payload.get_process().name} as a descendent')
                 self.node.remove_descendant(msg.payload)
+
+            case SignalActions.UNBLOCK:
+                print(f'{self.name} Unblocking....')
+                self.scheduler.unblock()
+
+            case SignalActions.EARLIEST_EVENT_REQUEST: # Physical process only
+                timestamp = self.mailbox.get_next_event_time()
+                dt = 1/self.frequency
+                msg = Signal(self, self.controller, SignalActions.EARLIEST_EVENT_REQUEST, (timestamp, timestamp + dt, self))
+                self.send(msg)
 
     def propagate_to(self, time):
         pass
@@ -103,6 +112,7 @@ class PhysicalProcess(Process):
 
         ## Communication ## 
         self.output_processes = set() # Set of subscribers to be notified when this process evolves
+        self.input_processes = set()
         self.controller = None
         self.logger = None
 
@@ -123,30 +133,32 @@ class PhysicalProcess(Process):
             self.increment_time()
             if self.logger:
                 self.log()
-            self.notify_output_processes()
-
-    def notify_output_processes(self): # Ideally move this to postal service or something. Not safe to assume this process has latest timestamps
-        for process in self.output_processes:
-            # Primary causality constraint 
-            if self.get_timestamp() - process.get_next_timestamp() < self.TIME_TOL:
-                # Only send messages when you need to
-                if self.get_next_timestamp() - process.get_next_timestamp() > self.TIME_TOL:
-                    msg = Event(self, process, EventActions.PULL_OUTPUT, self.get_timestamp(), self.output)
-                    self.send(msg)
 
     def process_event(self, msg):
         if self.get_timestamp() < msg.timestamp:
             raise ValueError(f'{self.name:} Attempting to process message in future')
 
         match msg.action:
-            case EventActions.PULL_OUTPUT:
+            case EventActions.DATA_PUSH:
                 print(f'{self.name} is pulling input from {msg.sender.name} valid at {msg.timestamp}')
                 self.input = msg.payload
+                if self.get_next_timestamp() < self.tf:
+                    msg = Event(self, msg.sender, EventActions.DATA_REQUEST, self.get_next_timestamp() - 1/msg.sender.frequency)
+                    self.send(msg)
+                else:
+                    msg = Event(self, msg.sender, EventActions.DATA_REQUEST, self.get_next_timestamp())
+                    self.send(msg)
+
+            case EventActions.DATA_REQUEST:
+                #print(f'{self.name} is sending input to {msg.sender.name} valid at {self.get_timestamp()}')
+                msg = Event(self, msg.sender, EventActions.DATA_PUSH, self.get_timestamp(), self.output)
+                self.send(msg)
 
             case EventActions.START:
                 print(f'{self.name}: Opened Begin message. Starting at {self.get_timestamp()}')
                 self.initialize()
                 self.log()
+                self.request_inputs()
             
             case EventActions.TERMINATE:
                 print(f'{self.name}: End message Received. {self.name} is Done!')
@@ -168,6 +180,11 @@ class PhysicalProcess(Process):
             case _:
                 raise ValueError(f'{self.name:} I dont know what to do with this message')
 
+    def request_inputs(self):
+        for process in self.input_processes:
+            msg = Event(self, process, EventActions.DATA_REQUEST, self.get_timestamp())
+            self.send(msg)
+
     def log(self):
         self.log_buffer.append((self.state, self.output, self.get_timestamp()))
         if len(self.log_buffer) == self.batch_size:
@@ -182,7 +199,9 @@ class PhysicalProcess(Process):
 
     def cascade_into(self, p):
        p.link_to(self) # P will wait for self's message
-       self.output_processes.add(p) # Self will message P every time it evolves
+       self.link_to(p)
+       p.input_processes.add(self) # Self will message P every time it evolves
+       self.output_processes.add(p)
 
     def get_timestamp(self):
         return self.tick / self.frequency 
@@ -198,6 +217,7 @@ class Controller(Process):
         super().__init__()
         self.name = 'Controller'
         self.active_processes = set()
+        self.recovery_queue = PriorityQueue()
 
     def process_event(self, msg):
         match msg.action:
@@ -220,10 +240,29 @@ class Controller(Process):
                 print(f'{self.name}: Removing {msg.payload.get_process().name} as a descendent')
                 self.node.remove_descendant(msg.payload)
                 if not self.node.get_descendants():
-                    print(f'Deadlock Detected!')
+                    self.deadlock_detected()
 
+            case SignalActions.EARLIEST_EVENT_REQUEST:
+                self.recovery_queue.put(msg.payload)
+                self.deadlock_recovery()
+            
             case _:
                 raise ValueError(f'{self.name:} I dont know what to do with this message')
+
+    def deadlock_detected(self):
+        print(f'Deadlock Detected!')
+        for process in self.active_processes:
+            msg = Signal(self, process, SignalActions.EARLIEST_EVENT_REQUEST)
+            self.send(msg)
+
+    def deadlock_recovery(self):
+        if self.recovery_queue.qsize() == len(self.active_processes): # not safe for duplicate messages
+            _, safe_time, _ = self.recovery_queue.queue[0]
+            #while self.recovery_queue:
+            timestamp, _, process = self.recovery_queue.get()
+            if timestamp <= safe_time:
+                msg = Signal(self, process, SignalActions.UNBLOCK)
+                self.send(msg)
 
     ## Public ## 
     def add_to_queue(self, p):
@@ -234,12 +273,13 @@ class Controller(Process):
 
     def initialize(self):
         print(f'{self.name}: is initializing...')
-        self.node.join_tree(self)
         for process in self.active_processes:
             self.node.add_descendant(process.get_node())
             msg = Event(self, process, EventActions.START, process.t0)
             self.send(msg)
             msg = Event(self, process, EventActions.TERMINATE, process.tf)
+            self.send(msg)
+            msg = Signal(self, process, SignalActions.UNBLOCK)
             self.send(msg)
 
 class Logger(Process):
