@@ -128,30 +128,29 @@ class PhysicalProcess(Process):
         self.tick += 1
 
     def propagate_to(self, prop_time):
-        while self.get_timestamp() < prop_time:
+        while self.get_next_timestamp() < prop_time:
             self.evolve()
             self.increment_time()
             if self.logger:
                 self.log()
 
     def process_event(self, msg):
-        if self.get_timestamp() < msg.timestamp:
-            raise ValueError(f'{self.name:} Attempting to process message in future')
 
         match msg.action:
             case EventActions.DATA_PUSH:
                 print(f'{self.name} is pulling input from {msg.sender.name} valid at {msg.timestamp}')
                 self.input = msg.payload
-                if self.get_next_timestamp() < self.tf:
-                    msg = Event(self, msg.sender, EventActions.DATA_REQUEST, self.get_next_timestamp() - 1/msg.sender.frequency)
-                    self.send(msg)
-                else:
-                    msg = Event(self, msg.sender, EventActions.DATA_REQUEST, self.get_next_timestamp())
-                    self.send(msg)
+
+            case EventActions.DATA_VALID:
+                msg = Event(self, msg.sender, EventActions.DATA_REQUEST, msg.timestamp)
+                self.send(msg)
 
             case EventActions.DATA_REQUEST:
                 #print(f'{self.name} is sending input to {msg.sender.name} valid at {self.get_timestamp()}')
-                msg = Event(self, msg.sender, EventActions.DATA_PUSH, self.get_timestamp(), self.output)
+                sender = msg.sender
+                msg = Event(self, sender, EventActions.DATA_PUSH, self.get_timestamp(), self.output)
+                self.send(msg)
+                msg = Event(self, sender, EventActions.DATA_VALID, max(self.get_next_timestamp(), sender.get_next_timestamp()))
                 self.send(msg)
 
             case EventActions.START:

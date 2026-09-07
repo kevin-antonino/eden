@@ -18,6 +18,7 @@ class EventActions(Enum):
     DATA_REQUEST    = auto() 
     DATA_PUSH       = auto()
     SIM_COMPLETE    = auto()
+    DATA_VALID      = auto()
 
 @dataclass(frozen=True)
 class Signal:
@@ -180,10 +181,10 @@ class PostalService():
             while msg_queue:
                 msg = msg_queue.popleft()
                 if isinstance(msg, Event):
-                    self.mailboxes[msg.receiver].push_event(msg)
                     print(f'{msg.sender.name} is sending {msg.action} message to {msg.receiver.name} at {msg.timestamp}')
+                    self.mailboxes[msg.receiver].push_event(msg)
                 else:
-                    self.mailboxes[msg.receiver].push_signal(msg)
                     print(f'{msg.sender.name} is sending {msg.action} message to {msg.receiver.name}')
+                    self.mailboxes[msg.receiver].push_signal(msg)
 
 
