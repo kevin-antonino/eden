@@ -1,46 +1,42 @@
-from abc import ABC
+from abc import ABC, abstractmethod
+from messaging import *
 
 class Scheduler(ABC):
     def __init__(self):
+        self.name = ''
         self.mailbox = Mailbox()
         self.node = TreeNode(self)
         self.scheduled_event = None
         self.bypass: bool = False # use an enum state
-        self.mutex: bool = False
     
     def execute(self):
         self.flush_signals()
-        if not self.mutex:
+        if not self.scheduled_event:
             self.schedule()
     
     def schedule(self):
-        if not self.scheduled_event:
-            if self.event_available():
-                self.schedule_event()
-            else:
-                self.check_if_blocked()
+        if self.safe_event(self.mailbox.get_inbox()) or self.bypass:
+            self.schedule_event()
+        else:
+            self.check_if_blocked()
 
     def flush_signals(self):
-        next_msg = self.mailbox.pop()
-        while next_msg:
-            self.process_message(next_msg)
+        next_signal = self.mailbox.pop_signal()
+        while next_signal:
+            self.process_signal(next_signal)
             next_signal = self.mailbox.pop_signal()
-
-    def event_available(self):
-        return self.safe_event(self.mailbox.get_inbox()) or self.bypass    
 
     def schedule_event(self):
         self.scheduled_event = self.mailbox.pop_event()
+        if not self.node.in_tree():
+            self.grow_tree(self.scheduled_event)
         if self.bypass:
             self.bypass = False # reset flag if used
 
     def get_next_event(self):
         next_event = self.scheduled_event
         if self.scheduled_event:
-            if not self.node.in_tree()
-                self.grow_tree(next_event)
             self.scheduled_event = None # reset
-
         return next_event
 
     def check_if_blocked(self):
@@ -71,9 +67,21 @@ class Scheduler(ABC):
             case SignalActions.UNBLOCK:
                 print(f'{self.name} Unblocking....')
                 self.bypass = True
-            
-            case SignalActions.DATA_REQUEST:
 
+            case SignalActions.EARLIEST_EVENT_REQUEST: # Physical process only
+                timestamp = self.mailbox.get_next_event_time()
+                dt = 1/self.frequency
+                msg = Signal(self, self.controller, SignalActions.EARLIEST_EVENT_REQUEST, (timestamp, timestamp + dt, self))
+                self.send(msg)
+        
+    def send(self, msg):
+        self.mailbox.push_to_outbox(msg)
+    
+    def receive_event(self, event):
+        self.mailbox.push_event(event)
+    
+    def receive_signal(self, signal):
+        self.mailbox.push_signal(signal)
 
     @abstractmethod
     def safe_event(self, inbox):
@@ -86,7 +94,7 @@ class ConservativeScheduler(Scheduler):
         else:
             return False
 
-class NullScheduler(Scheduler):
+class FreeScheduler(Scheduler):
     def safe_event(self, inbox):
         if any(inbox.values()): # If there is a message waiting 
             return True

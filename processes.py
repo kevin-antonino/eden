@@ -1,67 +1,63 @@
-from collections import deque
-from abc import ABC, abstractmethod
-from copy import copy
-from math import ceil
 from messaging import *
+from scheduling import *
+from abc import ABC, abstractmethod
+from collections import deque
+from math import ceil
 from plotting import plot_trajectory
 from numpy import concatenate
 
-class State(ABC):
+class States(Enum):
+    REQUESTING = auto()
+    WAITING    = auto()
+    EVOLVING  = auto()
+
+class StateMachine():
     def __init__(self):
-        pass
+        self.state = States.REQUESTING
+    
+    def transition(self, desired, expected):
+        if self.state != expected:
+            raise ValueError(f'Cannot transition from {self.state} to {desired}!')
+        self.state = desired
 
-    @abstractmethod
-    def update(self, scheduler):
-        ...
+    def inputs_requested(self):
+        self.transition(States.WAITING, States.REQUESTING)
 
-class State
-
+    def input_pulled(self, process):
+        self.transition(States.EVOLVING, States.WAITING)
+    
+    def process_evolved(self):
+        self.transition(States.REQUESTING, States.EVOLVING)
 
 class Process(ABC):
     TIME_TOL = 0.001
     def __init__(self):
         self.name = ''
-        self.scheduler = NullScheduler() 
+        self.scheduler = FreeScheduler() 
 
     def execute(self):
+        self.scheduler.execute()
         next_event = self.scheduler.get_next_event()
         if next_event:
-            if next_event.timestamp > self.get_timestamp():
-                self.propagate_to(next_event.timestamp)
+            self.propagate_to(next_event.timestamp)
             self.process_event(next_event)
+    
+    def propagate_to(self, time):
+        pass
+
+    @abstractmethod
+    def process_event(self, msg):
+        ...
 
     def send(self, msg):
-        self.mailbox.push_to_outbox(msg)
+        self.scheduler.send(msg)
 
     def link_to(self, p):
         print(f'{self.name} is now linked to {p.name}')
-        self.mailbox.connect_sender(p)
+        self.scheduler.mailbox.connect_sender(p)
 
     def get_node(self):
-        return self.node
-
-    def process_signal(self, msg):
-        match msg.action:
-            case SignalActions.NEW_NODE:
-                print(f'{self.name}: Adding {msg.payload.get_process().name} as a descendent')
-                self.node.add_descendant(msg.payload)
-
-            case SignalActions.KILL_NODE:
-                print(f'{self.name}: Removing {msg.payload.get_process().name} as a descendent')
-                self.node.remove_descendant(msg.payload)
-
-            case SignalActions.UNBLOCK:
-                print(f'{self.name} Unblocking....')
-                self.scheduler.unblock()
-
-            case SignalActions.EARLIEST_EVENT_REQUEST: # Physical process only
-                timestamp = self.mailbox.get_next_event_time()
-                dt = 1/self.frequency
-                msg = Signal(self, self.controller, SignalActions.EARLIEST_EVENT_REQUEST, (timestamp, timestamp + dt, self))
-                self.send(msg)
-
-    def propagate_to(self, time):
-        pass
+        return self.scheduler.node
 
     def initialize(self):
         print(f'{self.name} is initializing...')
@@ -73,6 +69,7 @@ class PhysicalProcess(Process):
     def __init__(self):
         super().__init__()
         self.scheduler = ConservativeScheduler()
+        #self.state_machine = StateMachine()
 
         ## State & I/O ##
         self.state  = None
@@ -86,13 +83,38 @@ class PhysicalProcess(Process):
         self.tick = 0
 
         ## Communication ## 
-        self.output_processes = set() # Set of subscribers to be notified when this process evolves
+        self.input_pulled = {}
         self.controller = None
         self.logger = None
 
         ## Logging ##
         self.batch_size = 1000
         self.log_buffer = deque()
+
+    '''
+    def execute(self):
+
+        match self.state_machine.state:
+            case States.WAITING:
+                self.handle_events()
+                if all(self.input_pulled):
+                    self.state_machine.inputs_pulled()
+                    self.input_pulled = {process : False for process in self.input_pulled.keys()}
+
+            case States.EVOLVING:
+                self.evolve()
+                self.increment_time()
+                if self.logger:
+                    self.log()
+                self.state_machine.process_evolved()
+        '''
+
+    def propagate_to(self, time):
+        while self.get_next_timestamp() < time:
+            self.evolve()
+            self.increment_time()
+            if self.logger:
+                self.log()
 
     def evolve(self):
         # Update internal state by dt
@@ -101,31 +123,32 @@ class PhysicalProcess(Process):
     def increment_time(self):
         self.tick += 1
 
-    def propagate_to(self, prop_time):
-        while self.get_timestamp() < prop_time:
-            self.evolve()
-            self.increment_time()
-            self.notify_output_processes()
-            if self.logger:
-                self.log()
-
-    def notify_output_processes(self):
-        for p in self.output_processes:
-            msg = Event(self, p, EventActions.DATA_PUSH, self.get_timestamp(), self.output)
+    def request_inputs(self):
+        for process in self.input_pulled.keys():
+            msg = Event(self.scheduler, process.scheduler, EventActions.DATA_REQUEST, self.get_next_timestamp())
             self.send(msg)
 
     def process_event(self, msg):
-        if self.get_timestamp() < msg.timestamp:
+        if self.get_next_timestamp() < msg.timestamp:
             raise ValueError(f'{self.name:} Attempting to process message in future')
 
         match msg.action:
             case EventActions.DATA_PUSH:
                 print(f'{self.name} is pulling input from {msg.sender.name} valid at {msg.timestamp}')
-                self.input = msg.payload
+                (ts, next_ts, self.input) = msg.payload
+                self.inputs_pulled[msg.sender] = True
+                msg = Event(self.scheduler, msg.sender.scheduler, EventActions.DATA_REQUEST, max(self.get_next_timestamp(), next_ts))
+                self.send(msg)
+
+            case EventActions.DATA_REQUEST:
+                #print(f'{self.name} is sending input to {msg.sender.name} valid at {self.get_timestamp()}')
+                msg = Event(self.scheduler, msg.sender.scheduler, EventActions.DATA_PUSH, self.get_timestamp(), (self.get_timestamp(), self.get_next_timestamp(), self.output))
+                self.send(msg)
 
             case EventActions.START:
                 print(f'{self.name}: Opened Begin message. Starting at {self.get_timestamp()}')
                 self.initialize()
+                self.request_inputs()
                 self.log()
             
             case EventActions.TERMINATE:
@@ -133,17 +156,18 @@ class PhysicalProcess(Process):
                 self.finish()
                 if self.logger:
                     self.flush_log()
-                    msg = Event(self, self.logger, EventActions.SIM_COMPLETE, self.get_timestamp())
+                    msg = Event(self.scheduler, self.logger.scheduler, EventActions.SIM_COMPLETE, self.get_timestamp())
                     self.send(msg)
-                for pr in self.output_processes:
-                    msg = Event(self, pr, EventActions.SIM_COMPLETE, self.get_timestamp())
-                    self.send(msg)
-                msg = Event(self, self.controller, EventActions.SIM_COMPLETE, self.get_timestamp())
+                #for pr in self.output_processes:
+                #    msg = Event(self, pr, EventActions.SIM_COMPLETE, self.get_timestamp())
+                #    self.send(msg)
+                msg = Event(self.scheduler, self.controller.scheduler, EventActions.SIM_COMPLETE, self.get_timestamp())
                 self.send(msg)
 
             case EventActions.SIM_COMPLETE:
-                print(f'{msg.receiver.name}: Notified that {msg.sender.name} is done!')
-                self.mailbox.disconnect_sender(msg.sender)
+                print(f'{self.name}: Notified that {msg.sender.name} is done!')
+                self.mailbox.disconnect_sender(msg.sender.scheduler)
+                self.input_pulled.remove(msg.sender)
 
             case _:
                 raise ValueError(f'{self.name:} I dont know what to do with this message')
@@ -162,7 +186,9 @@ class PhysicalProcess(Process):
 
     def cascade_into(self, p):
        p.link_to(self) # P will wait for self's message
-       self.output_processes.add(p)
+       p.input_pulled[self] = False
+       self.link_to(p)
+       #self.output_processes.add(p)
 
     def get_timestamp(self):
         return self.tick / self.frequency 
@@ -235,7 +261,7 @@ class Controller(Process):
     def initialize(self):
         print(f'{self.name}: is initializing...')
         for process in self.active_processes:
-            self.node.add_descendant(process.get_node())
+            #self.node.add_descendant(process.get_node())
             msg = Event(self, process, EventActions.START, process.t0)
             self.send(msg)
             msg = Event(self, process, EventActions.TERMINATE, process.tf)

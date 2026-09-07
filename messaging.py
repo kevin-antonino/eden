@@ -34,78 +34,6 @@ class Event:
     timestamp: float 
     payload: Any = None
 
-class Scheduler(ABC):
-    def __init__(self):
-        self.bypass: bool = False
-    
-    def unblock(self):
-        self.bypass = True # should be a check if there are events in inbox... consider making inbox a data member (scheduler gets inbox every frame)
-
-    def next_event(self, inbox) -> bool:
-        if self.safe_event(inbox) or self.bypass:
-            self.bypass = False
-            return True
-        else:
-            return False
-
-    @abstractmethod
-    def safe_event(self, inbox):
-        ...
-
-class ConservativeScheduler(Scheduler):
-    def safe_event(self, inbox):
-        if all(inbox.values()): # If there is a message waiting from all LPs
-            return True
-        else:
-            return False
-
-class NullScheduler(Scheduler):
-    def safe_event(self, inbox):
-        if any(inbox.values()): # If there is a message waiting 
-            return True
-        else:
-            return False
-
-class TreeNode():
-    def __init__(self, p):
-        self.ancestor = None 
-        self.process = p # address to process
-        self.descendants = set() # descendant nodes in tree
-
-    def add_descendant(self, node): # Maybe do root/leaf terminology 
-        if self in node.get_descendants():
-            raise ValueError('Attempting to add make an ancestor a descendant!')
-        else:
-            self.descendants.add(node)
-
-    def join_tree(self, ancestor_node: "TreeNode"):
-        if self.ancestor: 
-            raise ValueError('Node already in tree!')
-        self.ancestor = ancestor_node
-
-    def leave_tree(self):
-        if self.descendants:
-            raise ValueError('Attempting to disengage with descendants in tree!')
-        self.ancestor = None
-
-    def in_tree(self):
-        if self.ancestor or self.descendants:
-            return True
-        else:
-            return False
-
-    def get_descendants(self):
-        return self.descendants
-
-    def get_ancestor(self):
-        return self.ancestor
-    
-    def remove_descendant(self, node):
-        self.descendants.remove(node)
-
-    def get_process(self):
-        return self.process
-
 class Mailbox():
     def __init__(self):
         self.signal_queue = deque()
@@ -169,21 +97,20 @@ class Mailbox():
 
 class PostalService():
     def __init__(self):
-        self.mailboxes: dict["Process", Mailbox] = {}
+        self.schedulers: dict["Process", "Scheduler"] = {}
 
     def register(self, process):
-        self.mailboxes[process] = process.mailbox
+        self.schedulers[process] = process.scheduler
 
     def deliver(self):
-        for mb in self.mailboxes.values():
-            msg_queue = mb.get_outbox()
+        for scheduler in self.schedulers.values():
+            msg_queue = scheduler.mailbox.get_outbox()
             while msg_queue:
                 msg = msg_queue.popleft()
+                receiver = self.schedulers[msg.receiver]
                 if isinstance(msg, Event):
-                    self.mailboxes[msg.receiver].push_event(msg)
+                    receiver.receive_event(msg)
                     print(f'{msg.sender.name} is sending {msg.action} message to {msg.receiver.name} at {msg.timestamp}')
                 else:
-                    self.mailboxes[msg.receiver].push_signal(msg)
+                    receiver.receive_signal(msg)
                     print(f'{msg.sender.name} is sending {msg.action} message to {msg.receiver.name}')
-
-
