@@ -95,22 +95,22 @@ class Mailbox():
     def get_outbox(self):
         return self.outbox
 
-class PostalService():
+class MessageService():
     def __init__(self):
-        self.schedulers: dict["Process", "Scheduler"] = {}
+        self.address_map = {}
 
-    def register(self, process):
-        self.schedulers[process] = process.scheduler
+    def register(self, actor):
+        self.address_map[actor] = actor.get_address()
 
     def deliver(self):
-        for scheduler in self.schedulers.values():
-            msg_queue = scheduler.mailbox.get_outbox()
-            while msg_queue:
-                msg = msg_queue.popleft()
-                receiver = self.schedulers[msg.receiver]
+        for adr in self.address_map.values():
+            outgoing_msgs = adr.get_outbox()
+            while outgoing_msgs:
+                msg = outgoing_msgs.popleft()
+                end_adr = msg.receiver 
                 if isinstance(msg, Event):
-                    receiver.receive_event(msg)
+                    end_adr.receive_event(msg)
                     print(f'{msg.sender.name} is sending {msg.action} message to {msg.receiver.name} at {msg.timestamp}')
                 else:
-                    receiver.receive_signal(msg)
+                    end_adr.receive_signal(msg)
                     print(f'{msg.sender.name} is sending {msg.action} message to {msg.receiver.name}')
