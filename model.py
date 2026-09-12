@@ -1,5 +1,6 @@
-from messaging import *
-from scheduling import *
+from messages import *
+from states import ModelStateMachine, ModelStates
+from infrastructure import Scheduler
 from abc import ABC, abstractmethod
 from collections import deque
 from math import ceil
@@ -25,7 +26,7 @@ class Model():
         self.tick = 0
 
         ## Communication ## 
-        self.input_validity_times = {} 
+        self.input_validity_times = {}
         self.logger = None
 
         ## Logging ##
@@ -33,22 +34,30 @@ class Model():
         self.log_buffer = deque()
 
     def execute(self):
+        print(f'{self.name}: {self.statemachine}')
         match self.get_state():
             case ModelStates.REQUESTING: # Model is blocked because its waiting for inputs
                 self.process_available_events()
-                self.check_inputs() # Go to processing if inputs are good
+                if self.inputs_valid(): 
+                    self.statemachine.trigger('INPUTS_READY') # Transition to processing
             
             case ModelStates.PROCESSING: # Input data is valid, model is processing events within [t, t+dt)
                 self.process_available_events()
-                if self.scheduler.get_next_event_time() >= self.get_next_timestamp():
-                    self.statemachine.trigger('INCREMENT_TIME') # Transition to evolving
+                if self.scheduler.get_next_event_time() is not None:
+                    if self.scheduler.get_next_event_time() >= self.get_next_timestamp():
+                        self.statemachine.trigger('INCREMENT_TIME') # Transition to evolving
 
             case ModelStates.EVOLVING: # Model progressing time
                 self.evolve()
                 self.increment_time()
                 if self.logger:
                     self.log()
-                self.check_inputs() # Go to processing if inputs are good. else request
+
+                if self.inputs_valid(): 
+                    self.statemachine.trigger('INPUTS_READY') # Transition to processing
+                else:
+                    self.request_inputs()
+                    self.statemachine.trigger('NEED_INPUTS') # Transition to requesting
     
     def evolve(self):
         # Update internal state by dt
@@ -58,27 +67,23 @@ class Model():
         self.tick += 1
 
     def process_available_events(self):
-        if self.scheduler.get_next_event_time() < self.get_next_timestamp(): 
-            event = self.scheduler.pop_next_event()
-            self.process_event(event)
-
-    def check_inputs(self):
-        if self.inputs_valid(): 
-            self.statemachine.trigger('INPUTS_READY') # Transition to processing
+        if self.scheduler.get_next_event_time() is None:
+            return
         else:
-            self.request_inputs()
-            self.statemachine.trigger('NEED_INPUTS') # Transition to requesting
+            if  self.scheduler.get_next_event_time() < self.get_next_timestamp(): 
+                event = self.scheduler.pop_next_event()
+                self.process_event(event)
 
     def inputs_valid(self):
-        if self.input_validity_times is None:
+        if not self.input_validity_times:
             return True
         else:
-            return any(self.input_validity_times < self.get_timestamp())
+            return all([float(time) >= self.get_timestamp() for time in self.input_validity_times.values()])
 
     def request_inputs(self): 
         for model in self.input_validity_times.keys():
-            if self.input_validity_times[model] < self.get_timestamp()
-                msg = Event(self.get_address(), msg.sender, EventActions.DATA_REQUEST, self.get_next_timestamp())
+            if self.input_validity_times[model] < self.get_timestamp():
+                msg = Event(self.get_address(), model.get_address(), EventActions.DATA_REQUEST, self.get_next_timestamp()) # fix model get address here
                 self.send(msg)
 
     def process_event(self, msg):
@@ -89,7 +94,7 @@ class Model():
             case EventActions.DATA_PUSH:
                 print(f'{self.name} is pulling input from {msg.sender.name} valid at {msg.timestamp}')
                 (self.input, validity_end_time) = msg.payload
-                self.input_valid[msg.sender] = validity_end_time
+                self.input_validity_times[msg.sender] = validity_end_time
 
             case EventActions.DATA_REQUEST: 
                 # data will be pushed with a valid time <= this model's timestamp
@@ -101,6 +106,7 @@ class Model():
             
             case EventActions.DATA_VALID:
                 # Null message
+                print('CONSUMED DATA VALID')
                 ...
             
             case EventActions.START:
@@ -113,12 +119,12 @@ class Model():
                 self.finish()
                 if self.logger:
                     self.flush_log()
-                    msg = Event(self.scheduler, self.logger.scheduler, EventActions.SIM_COMPLETE, self.get_timestamp())
+                    msg = Event(self.get_address(), self.logger.scheduler, EventActions.SIM_COMPLETE, self.get_timestamp())
                     self.send(msg)
                 #for pr in self.output_processes:
                 #    msg = Event(self, pr, EventActions.SIM_COMPLETE, self.get_timestamp())
                 #    self.send(msg)
-                msg = Event(self.scheduler, self.controller.scheduler, EventActions.SIM_COMPLETE, self.get_timestamp()) # Fix
+                msg = Event(self.get_address(), self.controller.scheduler, EventActions.SIM_COMPLETE, self.get_timestamp()) # Fix
                 self.send(msg)
 
             case EventActions.SIM_COMPLETE:
@@ -139,9 +145,9 @@ class Model():
         self.log_buffer = deque()
         self.send(msg)
 
-    def link_to(self, p):
-        print(f'{self.name} is now linked to {p.name}')
-        self.scheduler.mailbox.connect_sender(p)
+    def link_to(self, model):
+        print(f'{self.name} is now linked to {model.name}')
+        self.scheduler.link_to(model)
 
     def get_node(self):
         return self.scheduler.node
@@ -151,6 +157,9 @@ class Model():
 
     def initialize(self):
         print(f'{self.name} is initializing...')
+        for model in self.input_validity_times.keys():
+            msg = Event(self.get_address(), model.get_address(), EventActions.DATA_REQUEST, self.get_timestamp()) # fix model get address here
+            self.send(msg)
 
     def finish(self):
         pass
@@ -160,14 +169,14 @@ class Model():
         self.scheduler.send(msg)
 
     def get_address(self):
-        return self.scheduler.get_address()
+        return self.scheduler
 
      ## Public ## 
 
     def cascade_into(self, p):
        p.link_to(self) # P will wait for self's message
-       p.input_pulled[self] = False
        self.link_to(p)
+       p.input_validity_times[self.get_address()] = -1
        #self.output_processes.add(p)
 
     def get_timestamp(self):

@@ -17,11 +17,12 @@ class EventActions(Enum):
     TERMINATE       = auto()
     DATA_REQUEST    = auto() 
     DATA_PUSH       = auto()
+    DATA_VALID      = auto()
     SIM_COMPLETE    = auto()
 
 @dataclass(frozen=True)
 class Signal:
-    sender: "Process"
+    sender: "Process" # Change to immaterial
     receiver: "Process"
     action: SignalActions
     payload: Any = None
@@ -80,7 +81,7 @@ class Mailbox():
         timestamp, _, _, = self.head.queue[0]
         return timestamp
 
-    def connect_sender(self, sender):
+    def connect_sender(self, sender: Mailbox):
         self.inbox[sender] = deque()
     
     def disconnect_sender(self, sender):
@@ -97,20 +98,23 @@ class Mailbox():
 
 class MessageService():
     def __init__(self):
-        self.address_map = {}
+        self.addresses = {}
+        self.actors = {}
 
     def register(self, actor):
-        self.address_map[actor] = actor.get_address()
+        self.addresses[actor] = actor.get_address()
+        self.actors[actor.get_address()] = actor
 
     def deliver(self):
-        for adr in self.address_map.values():
-            outgoing_msgs = adr.get_outbox()
+        for sender, adr in self.addresses.items():
+            outgoing_msgs = adr.mailbox.get_outbox()
             while outgoing_msgs:
                 msg = outgoing_msgs.popleft()
-                end_adr = msg.receiver 
+                sender_name = sender.name
+                receiver_name = self.actors[msg.receiver].name
+
+                print(f'{sender_name} is sending {msg.action} message to {receiver_name} at {msg.timestamp}')
                 if isinstance(msg, Event):
-                    end_adr.receive_event(msg)
-                    print(f'{msg.sender.name} is sending {msg.action} message to {msg.receiver.name} at {msg.timestamp}')
+                    msg.receiver.mailbox.push_event(msg)
                 else:
-                    end_adr.receive_signal(msg)
-                    print(f'{msg.sender.name} is sending {msg.action} message to {msg.receiver.name}')
+                    msg.receiver.mailbox.push_signal(msg)

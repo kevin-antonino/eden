@@ -1,4 +1,4 @@
-from messaging import *
+from messages import *
 from scheduling import *
 from abc import ABC, abstractmethod
 from collections import deque
@@ -6,44 +6,13 @@ from math import ceil
 from plotting import plot_trajectory
 from numpy import concatenate
 
-class States(Enum):
-    REQUESTING = auto()
-    WAITING    = auto()
-    EVOLVING  = auto()
-
-class StateMachine():
-    def __init__(self):
-        self.state = States.REQUESTING
-    
-    def transition(self, desired, expected):
-        if self.state != expected:
-            raise ValueError(f'Cannot transition from {self.state} to {desired}!')
-        self.state = desired
-
-    def inputs_requested(self):
-        self.transition(States.WAITING, States.REQUESTING)
-
-    def input_pulled(self, process):
-        self.transition(States.EVOLVING, States.WAITING)
-    
-    def process_evolved(self):
-        self.transition(States.REQUESTING, States.EVOLVING)
-
 class Process(ABC):
     TIME_TOL = 0.001
     def __init__(self):
         self.name = ''
-        self.scheduler = FreeScheduler() 
 
-    def execute(self):
-        self.scheduler.execute()
-        next_event = self.scheduler.get_next_event()
-        if next_event:
-            self.propagate_to(next_event.timestamp)
-            self.process_event(next_event)
-    
-    def propagate_to(self, time):
-        pass
+    def __str__(self):
+        return self.name
 
     @abstractmethod
     def process_event(self, msg):
@@ -205,6 +174,7 @@ class Controller(Process):
         self.name = 'Controller'
         self.active_processes = set()
         self.recovery_queue = PriorityQueue()
+        self.mailbox = Mailbox()
 
     def process_event(self, msg):
         match msg.action:

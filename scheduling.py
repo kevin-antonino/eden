@@ -1,5 +1,5 @@
 from abc import ABC, abstractmethod
-from messaging import *
+from messages import *
 
 class Scheduler(ABC):
     def __init__(self):

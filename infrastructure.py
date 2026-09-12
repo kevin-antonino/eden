@@ -1,10 +1,14 @@
 from abc import ABC
-from states import *
-
+from states import SimulationStates, SimulationStateMachine
+from scheduling import TreeNode
+from messages import *
 
 class Actor(ABC):
     def __init__(self):
         self.name = ''
+
+    def __str__(self):
+        return self.name
 
     # get_state can be here
     @abstractmethod
@@ -80,14 +84,15 @@ class Immaterial(ABC):
     def receive_event(self, event):
         self.mailbox.push_event(event)
     
-    def get_address(self)
-        return self.mailbox
+    def get_address(self):
+        return self
+
+    def link_to(self, actor):
+        print(f'{self.name} is now linked to {actor.name}')
+        self.mailbox.connect_sender(actor.get_address())
 
     def initialize(self):
        pass 
-
-    def get_address(self):
-        return self.mailbox
 
     @abstractmethod
     def process_signal(self, msg):
@@ -102,7 +107,7 @@ class Immaterial(ABC):
         ...
 
 class Scheduler(Immaterial):
-   def __init__(self):
+    def __init__(self):
         super().__init__()
         self.scheduled_event = None
         self.bypass: bool = False     
@@ -128,16 +133,22 @@ class Scheduler(Immaterial):
 
     def schedule_event(self):
         self.scheduled_event = self.mailbox.pop_event()
-        if not self.node.in_tree():
-            self.grow_tree(self.scheduled_event)
+        #if not self.node.in_tree():
+            #self.grow_tree(self.scheduled_event)
         if self.bypass:
             self.bypass = False # reset flag if used
 
-    def get_next_event(self):
+    def pop_next_event(self):
         next_event = self.scheduled_event
         if self.scheduled_event:
             self.scheduled_event = None # reset
         return next_event
+    
+    def get_next_event_time(self):
+        if self.scheduled_event:
+            return self.scheduled_event.timestamp
+        else:
+            return None
 
     def process_signal(self, msg):
         match msg.action:
@@ -185,6 +196,9 @@ class Controller(Immaterial):
             case _:
                 raise ValueError(f'{self.name:} I dont know what to do with this message')
 
+    def engaged(self):
+        pass
+
     def disengaged(self):
         print(f'Deadlock Detected!')
         for process in self.active_processes:
@@ -211,9 +225,7 @@ class Controller(Immaterial):
         print(f'{self.name}: is initializing...')
         for process in self.active_processes:
             #self.node.add_descendant(process.get_node())
-            msg = Event(self, process, EventActions.START, process.t0)
+            msg = Event(self, process.get_address(), EventActions.START, process.t0)
             self.send(msg)
-            msg = Event(self, process, EventActions.TERMINATE, process.tf)
-            self.send(msg)
-            msg = Signal(self, process, SignalActions.UNBLOCK)
+            msg = Event(self, process.get_address(), EventActions.TERMINATE, process.tf)
             self.send(msg)
