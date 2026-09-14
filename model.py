@@ -36,13 +36,17 @@ class Model():
     def execute(self):
         print(f'{self.name}: {self.statemachine}')
         match self.get_state():
-            case ModelStates.REQUESTING: # Model is blocked because its waiting for inputs
+            case ModelStates.WAITING: # Model is blocked because its waiting for inputs
                 self.process_available_events()
                 if self.inputs_valid(): 
                     self.statemachine.trigger('INPUTS_READY') # Transition to processing
             
             case ModelStates.PROCESSING: # Input data is valid, model is processing events within [t, t+dt)
                 self.process_available_events()
+                
+                if not self.inputs_valid():
+                    self.statemachine.trigger('NEED_INPUTS') # Transition to waiting
+
                 if self.scheduler.get_next_event_time() is not None:
                     if self.scheduler.get_next_event_time() >= self.get_next_timestamp():
                         self.statemachine.trigger('INCREMENT_TIME') # Transition to evolving
@@ -56,8 +60,8 @@ class Model():
                 if self.inputs_valid(): 
                     self.statemachine.trigger('INPUTS_READY') # Transition to processing
                 else:
-                    self.request_inputs()
-                    self.statemachine.trigger('NEED_INPUTS') # Transition to requesting
+                    #self.request_inputs()
+                    self.statemachine.trigger('NEED_INPUTS') # Transition to waiting
     
     def evolve(self):
         # Update internal state by dt
@@ -76,9 +80,11 @@ class Model():
 
     def inputs_valid(self):
         if not self.input_validity_times:
+            print('no inputs')
             return True
         else:
             return all([float(time) >= self.get_timestamp() for time in self.input_validity_times.values()])
+            #return any(validity_time < self.get_timestamp() for validity_time in self.input_validity_times.values())
 
     def request_inputs(self): 
         for model in self.input_validity_times.keys():
@@ -107,12 +113,13 @@ class Model():
             case EventActions.DATA_VALID:
                 # Null message
                 print('CONSUMED DATA VALID')
-                ...
-            
+                msg = Event(self.get_address(), msg.sender, EventActions.DATA_REQUEST, self.get_next_timestamp()) # fix model get address here
+                self.send(msg)
+
             case EventActions.START:
                 print(f'{self.name}: Opened Begin message. Starting at {self.get_timestamp()}')
-                self.initialize()
-                self.log()
+                #self.initialize()
+                #self.log()
             
             case EventActions.TERMINATE:
                 print(f'{self.name}: End message Received. {self.name} is Done!')

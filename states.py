@@ -7,9 +7,10 @@ class SimulationStates(Enum):
     DISENGAGED  = auto()
 
 class ModelStates(Enum):
-    REQUESTING  = auto() 
-    PROCESSING  = auto() 
-    EVOLVING    = auto() 
+    INITIALIZING = auto()
+    WAITING      = auto() 
+    PROCESSING   = auto() 
+    EVOLVING     = auto() 
 
 class StateMachine(ABC):
     def __init__(self):
@@ -30,24 +31,36 @@ class StateMachine(ABC):
     def trigger(self, trig_txt: str):
         transition = self.transition_map[self.state]
         next_state = transition(trig_txt)    
-        if next_state not in self.transition_map.keys():
-            raise ValueError(f'{state} isn\'t a state in this machine')
-        self.state = next_state
+        if next_state:
+            #if next_state not in self.transition_map.keys():
+            #    raise ValueError(f'{next_state.name} isn\'t a state in this machine')
+            self.state = next_state
+        else:
+            self.bad_transition()
 
     def get_state(self):
         return self.state
+    
+    def bad_transition(self):
+        raise ValueError(f'Unknown trigger text for {self}')
 
 class ModelStateMachine(StateMachine):
     def __init__(self):
         super().__init__()
-        self.add_state(ModelStates.REQUESTING, self.requesting_transition)
+        self.add_state(ModelStates.WAITING, self.waiting_transition)
         self.add_state(ModelStates.PROCESSING, self.processing_transition)
         self.add_state(ModelStates.EVOLVING, self.evolving_transition)
-        self.set_init_state(ModelStates.REQUESTING)
+        self.set_init_state(ModelStates.WAITING)
 
-    def requesting_transition(self, trig_txt):
+    def starting_transition(self, trig_txt):
+        if trig_txt == 'INITIALIZED':
+            return ModelStates.WAITING
+        else:
+            return None
+
+    def waiting_transition(self, trig_txt):
         if trig_txt == 'NEED_INPUTS':
-            return ModelStates.REQUESTING
+            return ModelStates.WAITING
         elif trig_txt == 'INPUTS_READY':
             return ModelStates.PROCESSING
         else:
@@ -56,12 +69,14 @@ class ModelStateMachine(StateMachine):
     def processing_transition(self, trig_txt):
         if trig_txt == 'INCREMENT_TIME':
             return ModelStates.EVOLVING
+        elif trig_txt == 'NEED_INPUTS':
+            return ModelStates.WAITING
         else:
             return None
 
     def evolving_transition(self, trig_txt):
         if trig_txt == 'NEED_INPUTS':
-            return ModelStates.REQUESTING
+            return ModelStates.WAITING
         elif trig_txt == 'INPUTS_READY':
             return ModelStates.PROCESSING
         else:
