@@ -16,7 +16,6 @@ class Simulation():
             self.controller.link_to(model)
             model.link_to(self.controller)
             self.controller.add_to_queue(model)
-            model.initialize()
 
         # Register controller
         self.service.register(self.controller)

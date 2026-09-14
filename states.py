@@ -8,7 +8,6 @@ class SimulationStates(Enum):
 
 class ModelStates(Enum):
     INITIALIZING = auto()
-    WAITING      = auto() 
     PROCESSING   = auto() 
     EVOLVING     = auto() 
 
@@ -47,21 +46,13 @@ class StateMachine(ABC):
 class ModelStateMachine(StateMachine):
     def __init__(self):
         super().__init__()
-        self.add_state(ModelStates.WAITING, self.waiting_transition)
+        self.add_state(ModelStates.INITIALIZING, self.initializing_transition)
         self.add_state(ModelStates.PROCESSING, self.processing_transition)
         self.add_state(ModelStates.EVOLVING, self.evolving_transition)
-        self.set_init_state(ModelStates.WAITING)
+        self.set_init_state(ModelStates.INITIALIZING)
 
-    def starting_transition(self, trig_txt):
+    def initializing_transition(self, trig_txt):
         if trig_txt == 'INITIALIZED':
-            return ModelStates.WAITING
-        else:
-            return None
-
-    def waiting_transition(self, trig_txt):
-        if trig_txt == 'NEED_INPUTS':
-            return ModelStates.WAITING
-        elif trig_txt == 'INPUTS_READY':
             return ModelStates.PROCESSING
         else:
             return None
@@ -69,15 +60,11 @@ class ModelStateMachine(StateMachine):
     def processing_transition(self, trig_txt):
         if trig_txt == 'INCREMENT_TIME':
             return ModelStates.EVOLVING
-        elif trig_txt == 'NEED_INPUTS':
-            return ModelStates.WAITING
         else:
             return None
 
     def evolving_transition(self, trig_txt):
-        if trig_txt == 'NEED_INPUTS':
-            return ModelStates.WAITING
-        elif trig_txt == 'INPUTS_READY':
+        if trig_txt == 'EVOLVED':
             return ModelStates.PROCESSING
         else:
             return None
