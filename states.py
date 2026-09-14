@@ -2,18 +2,6 @@ from collections.abc import Callable
 from abc import ABC, abstractmethod
 from enum import Enum, auto
 
-class SimulationStates(Enum):
-    ENGAGED     = auto()
-    DISENGAGED  = auto()
-    FINISHING   = auto()
-
-class ModelStates(Enum):
-    INITIALIZING = auto()
-    WAITING      = auto()
-    PROCESSING   = auto() 
-    EVOLVING     = auto() 
-    FINISHING    = auto()
-
 class StateMachine(ABC):
     def __init__(self):
         self.state = None
@@ -49,64 +37,3 @@ class StateMachine(ABC):
     def bad_transition(self):
         raise ValueError(f'Unknown trigger text for {self}')
 
-class ModelStateMachine(StateMachine):
-    def __init__(self):
-        super().__init__()
-        self.add_state(ModelStates.INITIALIZING, self.initializing_transition)
-        self.add_state(ModelStates.WAITING, self.waiting_transition)
-        self.add_state(ModelStates.PROCESSING, self.processing_transition)
-        self.add_state(ModelStates.EVOLVING, self.evolving_transition)
-        self.set_init_state(ModelStates.INITIALIZING)
-
-    def initializing_transition(self, trig_txt):
-        if trig_txt == 'INITIALIZED':
-            return ModelStates.PROCESSING
-        else:
-            return None
-
-    def waiting_transition(self, trig_txt):
-        if trig_txt == 'NEED_INPUTS':
-            return ModelStates.WAITING
-        elif trig_txt == 'INPUTS_READY':
-            return ModelStates.PROCESSING
-        else:
-            return None
-
-    def processing_transition(self, trig_txt):
-        if trig_txt == 'INCREMENT_TIME':
-            return ModelStates.EVOLVING
-        elif trig_txt == 'NEED_INPUTS':
-            return ModelStates.WAITING
-        elif trig_txt == 'END_MESSAGE':
-            return ModelStates.FINISHING
-        else:
-            return None
-
-    def evolving_transition(self, trig_txt):
-        if trig_txt == 'EVOLVED':
-            return ModelStates.PROCESSING
-        else:
-            return None
-
-class SimulationStateMachine(StateMachine):
-    def __init__(self):
-        super().__init__()
-        self.add_state(SimulationStates.ENGAGED, self.engaged_transition)
-        self.add_state(SimulationStates.DISENGAGED, self.disengaged_transition)
-        self.set_init_state(SimulationStates.ENGAGED)
-
-    def engaged_transition(self, trig_txt):
-        if trig_txt == 'LEAVING_TREE':
-            return SimulationStates.DISENGAGED
-        elif trig_txt == 'FINISH':
-            return SimulationStates.FINISHING
-        else:
-            return None
-
-    def disengaged_transition(self, trig_txt):
-        if trig_txt == 'JOINING_TREE':
-            return SimulationStates.ENGAGED
-        else:
-            return None
-
-    

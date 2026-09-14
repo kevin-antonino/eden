@@ -84,7 +84,7 @@ class Mailbox():
         timestamp, _, _, = self.head.queue[0]
         return timestamp
 
-    def connect_sender(self, sender: Mailbox):
+    def connect_sender(self, sender: "Mailbox"):
         self.inbox[sender] = deque()
     
     def disconnect_sender(self, sender):
