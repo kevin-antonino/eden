@@ -37,3 +37,43 @@ class StateMachine(ABC):
     def bad_transition(self):
         raise ValueError(f'Unknown trigger text for {self}')
 
+class TreeNode():
+    def __init__(self, p):
+        self.ancestor = None 
+        self.process = p # address to process
+        self.descendants = set() # descendant nodes in tree
+
+    def add_descendant(self, node): # Maybe do root/leaf terminology 
+        if self in node.get_descendants():
+            raise ValueError('Attempting to add make an ancestor a descendant!')
+        else:
+            self.descendants.add(node)
+
+    def join_tree(self, ancestor_node: "TreeNode"):
+        if self.ancestor: 
+            raise ValueError('Node already in tree!')
+        self.ancestor = ancestor_node
+
+    def leave_tree(self):
+        if self.descendants:
+            raise ValueError('Attempting to disengage with descendants in tree!')
+        self.ancestor = None
+
+    def in_tree(self):
+        if self.ancestor or self.descendants:
+            return True
+        else:
+            return False
+
+    def get_descendants(self):
+        return self.descendants
+
+    def get_ancestor(self):
+        return self.ancestor
+    
+    def remove_descendant(self, node):
+        self.descendants.remove(node)
+
+    def get_process(self):
+        return self.process
+
