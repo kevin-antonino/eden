@@ -26,7 +26,7 @@ class Model():
         self.tick = 0
 
         ## Communication ## 
-        self.input_models = set()
+        self.input_validity_times = {}
         self.logger = None
 
         ## Logging ##
@@ -39,16 +39,25 @@ class Model():
             case ModelStates.INITIALIZING:
                 self.initialize()
                 self.log()
-                for model in self.input_models:
+                for model in self.input_validity_times.keys():
                     msg = Event(self.get_address(), model.get_address(), EventActions.DATA_REQUEST, self.get_timestamp()) # fix model get address here
                     self.send(msg)
                 self.statemachine.trigger('INITIALIZED')
 
-            case ModelStates.PROCESSING: # Model is processing events within [t, t+dt)
+            case ModelStates.WAITING: # Model is blocked because its waiting for inputs
                 self.process_available_events()
-                if self.scheduler.get_next_event_time() is not None:
-                    if self.scheduler.get_next_event_time() >= self.get_next_timestamp():
-                        self.statemachine.trigger('INCREMENT_TIME') # Transition to evolving
+                if self.inputs_valid(): 
+                    self.statemachine.trigger('INPUTS_READY') # Transition to processing
+
+            case ModelStates.PROCESSING: # Inputs are valid and Model is processing events within [t, t+dt)
+                self.process_available_events()
+
+                if not self.inputs_valid():
+                    self.statemachine.trigger('NEED_INPUTS') # Transition to waiting
+                else:
+                    if self.scheduler.get_next_event_time() is not None:
+                        if self.scheduler.get_next_event_time() >= self.get_next_timestamp():
+                            self.statemachine.trigger('INCREMENT_TIME') # Transition to evolving
 
             case ModelStates.EVOLVING: # Model progressing time
                 self.evolve()
@@ -83,6 +92,12 @@ class Model():
                 event = self.scheduler.pop_next_event()
                 self.process_event(event)
 
+    def inputs_valid(self):
+        if not self.input_validity_times:
+            return True
+        else:
+            return all(validity_time >= self.get_timestamp() for validity_time in self.input_validity_times.values())
+
     def process_event(self, msg):
         if self.get_next_timestamp() < msg.timestamp:
             raise ValueError(f'{self.name:} Attempting to process message in future')
@@ -91,6 +106,7 @@ class Model():
             case EventActions.DATA_PUSH:
                 print(f'{self.name} is pulling input from {msg.sender.name} valid at {msg.timestamp}')
                 (self.input, validity_end_time) = msg.payload
+                self.input_validity_times[msg.sender] = validity_end_time
 
             case EventActions.DATA_REQUEST: 
                 # data will be pushed with a valid time <= this model's timestamp
@@ -118,8 +134,8 @@ class Model():
             case EventActions.SIM_COMPLETE:
                 print(f'{self.name}: Notified that {msg.sender.name} is done!')
                 self.scheduler.mailbox.disconnect_sender(msg.sender.get_address())
-                if self.input_models:
-                    self.input_models.remove(msg.sender.get_address())
+                if self.input_validity_times:
+                    self.input_validity_times.remove(msg.sender.get_address())
 
             case _:
                 raise ValueError(f'{self.name:} I dont know what to do with this message')
@@ -162,7 +178,7 @@ class Model():
     def cascade_into(self, p):
        p.link_to(self) # P will wait for self's message
        self.link_to(p)
-       p.input_models.add(self.get_address())
+       p.input_validity_times[self.get_address()] = -1
 
     def get_timestamp(self):
         return self.tick / self.frequency 
