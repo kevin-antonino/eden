@@ -5,11 +5,13 @@ from enum import Enum, auto
 class SimulationStates(Enum):
     ENGAGED     = auto()
     DISENGAGED  = auto()
+    FINISHING   = auto()
 
 class ModelStates(Enum):
     INITIALIZING = auto()
     PROCESSING   = auto() 
     EVOLVING     = auto() 
+    FINISHING    = auto()
 
 class StateMachine(ABC):
     def __init__(self):
@@ -37,6 +39,9 @@ class StateMachine(ABC):
         else:
             self.bad_transition()
 
+    def __call__(self, trig_txt):
+        self.trigger(trig_txt)
+
     def get_state(self):
         return self.state
     
@@ -60,6 +65,8 @@ class ModelStateMachine(StateMachine):
     def processing_transition(self, trig_txt):
         if trig_txt == 'INCREMENT_TIME':
             return ModelStates.EVOLVING
+        elif trig_txt == 'END_MESSAGE':
+            return ModelStates.FINISHING
         else:
             return None
 
@@ -79,6 +86,8 @@ class SimulationStateMachine(StateMachine):
     def engaged_transition(self, trig_txt):
         if trig_txt == 'LEAVING_TREE':
             return SimulationStates.DISENGAGED
+        elif trig_txt == 'FINISH':
+            return SimulationStates.FINISHING
         else:
             return None
 

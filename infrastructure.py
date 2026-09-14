@@ -36,6 +36,10 @@ class Immaterial(ABC):
                 self.flush_signals()
                 self.disengaged()
 
+            case SimulationStates.FINISHING:
+                self.flush_signals()
+                self.finishing()
+
     def flush_signals(self):
         next_signal = self.mailbox.pop_signal()
         while next_signal:
@@ -91,6 +95,9 @@ class Immaterial(ABC):
         print(f'{self.name} is now linked to {actor.name}')
         self.mailbox.connect_sender(actor.get_address())
 
+    def finish(self):
+        self.statemachine.trigger('FINISH')    
+
     def initialize(self):
        pass 
 
@@ -104,6 +111,10 @@ class Immaterial(ABC):
     
     @abstractmethod
     def disengaged(self):
+        ...
+    
+    @abstractmethod
+    def finishing(self):
         ...
 
 class Scheduler(Immaterial):
@@ -169,6 +180,9 @@ class Scheduler(Immaterial):
         else:
             return False
 
+    def finishing(self):
+        self.schedule_event()
+
 class Controller(Immaterial):
     def __init__(self):
         super().__init__()
@@ -197,7 +211,9 @@ class Controller(Immaterial):
                 raise ValueError(f'{self.name:} I dont know what to do with this message')
 
     def engaged(self):
-        pass
+        msg = self.mailbox.pop_event()
+        if msg:
+            self.process_event(msg)
 
     def disengaged(self):
         print(f'Deadlock Detected!')
@@ -229,3 +245,6 @@ class Controller(Immaterial):
             self.send(msg)
             msg = Event(self, process.get_address(), EventActions.TERMINATE, process.tf)
             self.send(msg)
+
+    def finishing(self):
+        pass

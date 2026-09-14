@@ -37,13 +37,14 @@ class Model():
         #print(f'{self.name}: {self.statemachine}')
         match self.get_state():
             case ModelStates.INITIALIZING:
+                self.initialize()
+                self.log()
                 for model in self.input_models:
                     msg = Event(self.get_address(), model.get_address(), EventActions.DATA_REQUEST, self.get_timestamp()) # fix model get address here
                     self.send(msg)
-                self.initialize()
                 self.statemachine.trigger('INITIALIZED')
 
-            case ModelStates.PROCESSING: # Input data is valid, model is processing events within [t, t+dt)
+            case ModelStates.PROCESSING: # Model is processing events within [t, t+dt)
                 self.process_available_events()
                 if self.scheduler.get_next_event_time() is not None:
                     if self.scheduler.get_next_event_time() >= self.get_next_timestamp():
@@ -55,6 +56,17 @@ class Model():
                 if self.logger:
                     self.log()
                 self.statemachine.trigger('EVOLVED') # Transition to processing
+
+            case ModelStates.FINISHING:
+                # Consume remaining messages at this timestamp
+                self.process_available_events()
+                if self.scheduler.get_next_event_time() is None: # No more events to sim
+                    self.finish()
+                    if self.logger:
+                        self.flush_log()
+                    for actor in self.scheduler.mailbox.get_senders():
+                        msg = Event(self.get_address(), actor.get_address(), EventActions.SIM_COMPLETE, self.get_timestamp())
+                        self.send(msg)
     
     def evolve(self):
         # Update internal state by dt
@@ -67,7 +79,7 @@ class Model():
         if self.scheduler.get_next_event_time() is None:
             return
         else:
-            if  self.scheduler.get_next_event_time() < self.get_next_timestamp(): 
+            if self.scheduler.get_next_event_time() < self.get_next_timestamp(): 
                 event = self.scheduler.pop_next_event()
                 self.process_event(event)
 
@@ -89,8 +101,9 @@ class Model():
                 self.send(msg)
             
             case EventActions.DATA_VALID:
-                msg = Event(self.get_address(), msg.sender, EventActions.DATA_REQUEST, self.get_next_timestamp()) # fix model get address here
-                self.send(msg)
+                if self.get_timestamp() < self.tf:
+                    msg = Event(self.get_address(), msg.sender, EventActions.DATA_REQUEST, self.get_next_timestamp()) # fix model get address here
+                    self.send(msg)
 
             case EventActions.START:
                 print(f'{self.name}: Opened Begin message. Starting at {self.get_timestamp()}')
@@ -98,22 +111,15 @@ class Model():
                 #self.log()
             
             case EventActions.TERMINATE:
-                print(f'{self.name}: End message Received. {self.name} is Done!')
-                self.finish()
-                if self.logger:
-                    self.flush_log()
-                    msg = Event(self.get_address(), self.logger.scheduler, EventActions.SIM_COMPLETE, self.get_timestamp())
-                    self.send(msg)
-                #for pr in self.output_processes:
-                #    msg = Event(self, pr, EventActions.SIM_COMPLETE, self.get_timestamp())
-                #    self.send(msg)
-                msg = Event(self.get_address(), self.controller.scheduler, EventActions.SIM_COMPLETE, self.get_timestamp()) # Fix
-                self.send(msg)
+                print(f'{self}: End message Received. {self} has reached tf')
+                self.scheduler.finish()
+                self.statemachine.trigger('END_MESSAGE')
 
             case EventActions.SIM_COMPLETE:
                 print(f'{self.name}: Notified that {msg.sender.name} is done!')
-                self.mailbox.disconnect_sender(msg.sender.scheduler)
-                self.input_pulled.remove(msg.sender)
+                self.scheduler.mailbox.disconnect_sender(msg.sender.get_address())
+                if self.input_models:
+                    self.input_models.remove(msg.sender.get_address())
 
             case _:
                 raise ValueError(f'{self.name:} I dont know what to do with this message')
@@ -156,7 +162,7 @@ class Model():
     def cascade_into(self, p):
        p.link_to(self) # P will wait for self's message
        self.link_to(p)
-       p.input_models.add(self)
+       p.input_models.add(self.get_address())
 
     def get_timestamp(self):
         return self.tick / self.frequency 

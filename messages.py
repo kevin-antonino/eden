@@ -67,15 +67,18 @@ class Mailbox():
         return signal
 
     def pop_event(self): 
-        # Remove and return current earliest message 
-        _, _, top_msg = self.head.get()
-        self.inbox[top_msg.sender].popleft()
-        # Update head if there are messages waiting
-        msg_queue = self.inbox[top_msg.sender]
-        if msg_queue:
-            self.head.put((msg_queue[0].timestamp, self.count, msg_queue[0]))
-            self.count += 1
-        return top_msg
+        if self.head.empty():
+            return None
+        else:
+            # Remove and return current earliest message 
+            _, _, top_msg = self.head.get()
+            self.inbox[top_msg.sender].popleft()
+            # Update head if there are messages waiting
+            msg_queue = self.inbox[top_msg.sender]
+            if msg_queue:
+                self.head.put((msg_queue[0].timestamp, self.count, msg_queue[0]))
+                self.count += 1
+            return top_msg
 
     def get_next_event_time(self):
         timestamp, _, _, = self.head.queue[0]
