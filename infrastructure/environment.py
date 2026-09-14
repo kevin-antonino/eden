@@ -1,6 +1,5 @@
-from model import *
-from infrastructure import *
-from messages import *
+from infrastructure.controller import *
+from infrastructure.messages import *
 
 class Simulation():
     def __init__(self, models: set):

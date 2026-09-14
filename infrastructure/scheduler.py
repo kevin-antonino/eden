@@ -1,4 +1,4 @@
-from node import Node
+from infrastructure.node import Node
 
 class Scheduler(Node):
     def __init__(self):

@@ -1,6 +1,8 @@
 from abc import ABC, abstractmethod
 from enum import Enum, auto
-from states import StateMachine
+from infrastructure.util import StateMachine, TreeNode
+from infrastructure.actor import Actor
+from infrastructure.messages import *
 
 class NodeStates(Enum):
     ENGAGED     = auto()
@@ -10,21 +12,21 @@ class NodeStates(Enum):
 class NodeStateMachine(StateMachine):
     def __init__(self):
         super().__init__()
-        self.add_state(SimulationStates.ENGAGED, self.engaged_transition)
-        self.add_state(SimulationStates.DISENGAGED, self.disengaged_transition)
-        self.set_init_state(SimulationStates.ENGAGED)
+        self.add_state(NodeStates.ENGAGED, self.engaged_transition)
+        self.add_state(NodeStates.DISENGAGED, self.disengaged_transition)
+        self.set_init_state(NodeStates.ENGAGED)
 
     def engaged_transition(self, trig_txt):
         if trig_txt == 'LEAVING_TREE':
-            return SimulationStates.DISENGAGED
+            return NodeStates.DISENGAGED
         elif trig_txt == 'FINISH':
-            return SimulationStates.FINISHING
+            return NodeStates.FINISHING
         else:
             return None
 
     def disengaged_transition(self, trig_txt):
         if trig_txt == 'JOINING_TREE':
-            return SimulationStates.ENGAGED
+            return NodeStates.ENGAGED
         else:
             return None
 
@@ -32,21 +34,21 @@ class NodeStateMachine(StateMachine):
 class Node(Actor):
     def __init__(self):
         self.name = ''
-        self.statemachine = SimulationStateMachine()
+        self.statemachine = NodeStateMachine()
         self.mailbox = Mailbox()
         self.node = TreeNode(self)
     
     def execute(self):
         match self.get_state():
-            case SimulationStates.ENGAGED:
+            case NodeStates.ENGAGED:
                 self.flush_signals()
                 self.engaged()
 
-            case SimulationStates.DISENGAGED:
+            case NodeStates.DISENGAGED:
                 self.flush_signals()
                 self.disengaged()
 
-            case SimulationStates.FINISHING:
+            case NodeStates.FINISHING:
                 self.flush_signals()
                 self.finishing()
 
@@ -76,7 +78,7 @@ class Node(Actor):
             msg = Signal(self, ancestor_node.get_process(), SignalActions.KILL_NODE, self.node)
             self.send(msg)
             self.node.leave_tree()
-            self.state = SimulationStates.DISENGAGED
+            self.state = NodeStates.DISENGAGED
 
     def grow_tree(self, new_message):
         print(f'{self.name}: Becoming engaged, ancestor is {new_message.sender.name}')
@@ -84,7 +86,7 @@ class Node(Actor):
         self.node.join_tree(ancestor_node)
         msg = Signal(self, new_message.sender, SignalActions.NEW_NODE, self.node)
         self.send(msg)
-        self.state = SimulationStates.ENGAGED
+        self.state = NodeStates.ENGAGED
 
     def get_state(self): 
         return self.statemachine.get_state()
