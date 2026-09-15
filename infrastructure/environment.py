@@ -11,13 +11,13 @@ class Simulation():
         print('SIMULATION INITIALIZING')
         # Register models to the sim infrastructure
         for model in self.models:
-            self.service.register(model) 
+            self.service.register(model.name, model.get_address()) 
             self.controller.link_to(model)
             model.link_to(self.controller)
             self.controller.add_to_queue(model)
 
         # Register controller
-        self.service.register(self.controller)
+        self.service.register(self.controller.name, self.controller.get_address())
         self.controller.initialize()
         print('SIMULATION INITIALIZATION COMPLETE')
 

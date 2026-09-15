@@ -101,23 +101,19 @@ class Mailbox():
 
 class MessageService():
     def __init__(self):
-        self.addresses = {}
-        self.actors = {}
+        self.address_map = {}
 
-    def register(self, actor):
-        self.addresses[actor] = actor.get_address()
-        self.actors[actor.get_address()] = actor
+    def register(self, name, address):
+        self.address_map[address] = name
 
     def deliver(self):
-        for sender, adr in self.addresses.items():
-            outgoing_msgs = adr.mailbox.get_outbox()
+        for addr in self.address_map.keys():
+            outgoing_msgs = addr.mailbox.get_outbox()
             while outgoing_msgs:
                 msg = outgoing_msgs.popleft()
-                sender_name = sender.name
-                receiver_name = self.actors[msg.receiver].name
-
-                print(f'{sender_name} is sending {msg.action} message to {receiver_name} at {msg.timestamp}')
+                print(f'{self.address_map[msg.sender]} is sending {msg.action} message to {self.address_map[msg.sender]} at {msg.timestamp}')
                 if isinstance(msg, Event):
                     msg.receiver.mailbox.push_event(msg)
                 else:
                     msg.receiver.mailbox.push_signal(msg)
+

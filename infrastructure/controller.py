@@ -6,6 +6,7 @@ class Controller(Node):
         super().__init__()
         self.name = 'Controller'
         self.active_processes = set()
+        self.map = {}  
         self.recovery_queue = PriorityQueue()
 
     def process_event(self, msg):
@@ -13,7 +14,8 @@ class Controller(Node):
             case EventActions.SIM_COMPLETE:
                 print(f'{self.name}: Notified that {msg.sender.name} is done!')
                 self.mailbox.disconnect_sender(msg.sender)
-                self.active_processes.remove(msg.sender)
+                model = self.map[msg.sender]
+                self.active_processes.remove(model)
                 if not self.active_processes:
                     self.finish()
             case _:
@@ -49,8 +51,9 @@ class Controller(Node):
                 self.send(msg)
 
     ## Public ## 
-    def add_to_queue(self, p):
-        self.active_processes.add(p)
+    def add_to_queue(self, model):
+        self.active_processes.add(model)
+        self.map[model.get_address()] = model
 
     def get_queue(self):
         return self.active_processes
