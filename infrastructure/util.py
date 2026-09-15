@@ -10,7 +10,8 @@ class StateMachine(ABC):
     def __str__(self):
         return self.state.name
 
-    def add_state(self, name: Enum, transition: Callable[[str], Enum | None]):
+    def add_state(self, name: Enum, transition: Callable[[str], Enum | None] = None):
+        #if transition:
         self.transition_map[name] = transition
    
     def set_init_state(self, desired_state: str):

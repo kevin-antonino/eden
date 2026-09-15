@@ -23,6 +23,7 @@ class ModelStateMachine(StateMachine):
         self.add_state(ModelStates.WAITING, self.waiting_transition)
         self.add_state(ModelStates.PROCESSING, self.processing_transition)
         self.add_state(ModelStates.EVOLVING, self.evolving_transition)
+        #self.add_state(ModelStates.FINISHING)
         self.set_init_state(ModelStates.INITIALIZING)
 
     def initializing_transition(self, trig_txt):
@@ -99,9 +100,14 @@ class Model(Actor):
 
             case ModelStates.PROCESSING: # Inputs are valid and Model is processing events within [t, t+dt)
                 self.process_available_events()
+                
+                if self.get_timestamp() == self.tf:
+                    self.scheduler.finish()
+                    self.statemachine.trigger('END_MESSAGE')
 
-                if not self.inputs_valid():
+                elif not self.inputs_valid():
                     self.statemachine.trigger('NEED_INPUTS') # Transition to waiting
+
                 else:
                     if self.scheduler.get_next_event_time() is not None:
                         if self.scheduler.get_next_event_time() >= self.get_next_timestamp():
@@ -147,8 +153,8 @@ class Model(Actor):
             return all(validity_time >= self.get_timestamp() for validity_time in self.input_validity_times.values())
 
     def process_event(self, msg):
-        if self.get_next_timestamp() < msg.timestamp:
-            raise ValueError(f'{self.name:} Attempting to process message in future')
+        if self.get_next_timestamp() < msg.timestamp: # Can only process msgs in [t, t+dt)
+            raise ValueError(f'{self}: Attempting to process message in future!')
 
         match msg.action:
             case EventActions.DATA_PUSH:
@@ -168,9 +174,6 @@ class Model(Actor):
                 if self.get_next_timestamp() < self.tf:
                     msg = Event(self.get_address(), msg.sender, EventActions.DATA_REQUEST, self.get_next_timestamp()) # fix model get address here
                     self.send(msg)
-                else:
-                    msg = Event(self.get_address(), msg.sender, EventActions.DATA_REQUEST, self.get_timestamp()) # fix model get address here
-                    self.send(msg)
 
             case EventActions.START:
                 print(f'{self.name}: Opened Begin message. Starting at {self.get_timestamp()}')
@@ -179,14 +182,12 @@ class Model(Actor):
             
             case EventActions.TERMINATE:
                 print(f'{self}: End message Received. {self} has reached tf')
-                self.scheduler.finish()
-                self.statemachine.trigger('END_MESSAGE')
 
             case EventActions.SIM_COMPLETE:
                 print(f'{self.name}: Notified that {msg.sender.name} is done!')
                 self.scheduler.mailbox.disconnect_sender(msg.sender.get_address())
                 if self.input_validity_times:
-                    self.input_validity_times.remove(msg.sender.get_address())
+                    self.input_validity_times.pop(msg.sender.get_address())
 
             case _:
                 raise ValueError(f'{self.name:} I dont know what to do with this message')
