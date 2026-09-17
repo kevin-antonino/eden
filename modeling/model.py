@@ -83,6 +83,7 @@ class Model(Actor):
         self.log_buffer = deque()
 
     def execute(self):
+        self.scheduler.execute()
         #print(f'{self.name}: {self.statemachine}')
         match self.get_state():
             case ModelStates.INITIALIZING:
@@ -114,6 +115,7 @@ class Model(Actor):
                             self.statemachine.trigger('INCREMENT_TIME') # Transition to evolving
 
             case ModelStates.EVOLVING: # Model progressing time
+                print(f'{self.name}: Evolving from {self.get_timestamp()} to {self.get_next_timestamp()}')
                 self.evolve()
                 self.increment_time()
                 if self.logger:
@@ -130,6 +132,10 @@ class Model(Actor):
                     for actor in self.scheduler.mailbox.get_senders():
                         msg = Event(self.get_address(), actor.get_address(), EventActions.SIM_COMPLETE, self.get_timestamp())
                         self.send(msg)
+                    if self.logger:
+                        msg = Event(self.get_address(), self.logger.get_address(), EventActions.SIM_COMPLETE, self.get_timestamp())
+                        self.send(msg)
+
     
     def evolve(self):
         # Update internal state by dt
@@ -198,7 +204,7 @@ class Model(Actor):
             self.flush_log()
 
     def flush_log(self):
-        msg = Signal(self, self.logger, SignalActions.LOG, self.log_buffer) # buffer has to be a shallow copy!
+        msg = Signal(self.get_address(), self.logger.get_address(), SignalActions.LOG, self.log_buffer) # buffer has to be a shallow copy!
         self.log_buffer = deque()
         self.send(msg)
 

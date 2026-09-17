@@ -18,7 +18,6 @@ class Simulation():
 
         # Register controller
         self.service.register(self.controller.name, self.controller.get_address())
-        self.controller.initialize()
         print('SIMULATION INITIALIZATION COMPLETE')
 
     def run(self):
@@ -26,11 +25,10 @@ class Simulation():
         self.service.deliver() # Deliver all init messages
         queue = self.controller.get_queue()
         while queue:
-        #for i in range(1,20):
             self.controller.execute()
             self.service.deliver()
             queue = self.controller.get_queue()
             for process in queue:
-                process.scheduler.execute()
                 process.execute()
                 self.service.deliver()
+

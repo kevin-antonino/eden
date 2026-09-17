@@ -5,16 +5,24 @@ from infrastructure.actor import Actor
 from infrastructure.messages import *
 
 class NodeStates(Enum):
-    ENGAGED     = auto()
-    DISENGAGED  = auto()
-    FINISHING   = auto()
+    INITIALIZING = auto()
+    ENGAGED      = auto()
+    DISENGAGED   = auto()
+    FINISHING    = auto()
 
 class NodeStateMachine(StateMachine):
     def __init__(self):
         super().__init__()
+        self.add_state(NodeStates.INITIALIZING, self.initializing_transition)
         self.add_state(NodeStates.ENGAGED, self.engaged_transition)
         self.add_state(NodeStates.DISENGAGED, self.disengaged_transition)
-        self.set_init_state(NodeStates.ENGAGED)
+        self.set_init_state(NodeStates.INITIALIZING)
+
+    def initializing_transition(self, trig_txt):
+        if trig_txt == 'INITIALIZED':
+            return NodeStates.ENGAGED
+        else:
+            return None
 
     def engaged_transition(self, trig_txt):
         if trig_txt == 'LEAVING_TREE':
@@ -40,6 +48,10 @@ class Node(Actor):
     
     def execute(self):
         match self.get_state():
+            case NodeStates.INITIALIZING:
+                self.initialize()
+                self.statemachine.trigger('INITIALIZED')
+
             case NodeStates.ENGAGED:
                 self.flush_signals()
                 self.engaged()

@@ -111,8 +111,8 @@ class MessageService():
             outgoing_msgs = addr.mailbox.get_outbox()
             while outgoing_msgs:
                 msg = outgoing_msgs.popleft()
-                print(f'{self.address_map[msg.sender]} is sending {msg.action} message to {self.address_map[msg.sender]} at {msg.timestamp}')
                 if isinstance(msg, Event):
+                    print(f'{self.address_map[msg.sender]} is sending {msg.action} message to {self.address_map[msg.receiver]} at {msg.timestamp}')
                     msg.receiver.mailbox.push_event(msg)
                 else:
                     msg.receiver.mailbox.push_signal(msg)

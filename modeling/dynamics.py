@@ -1,9 +1,9 @@
-from processes import PhysicalProcess
-from integrators import RungeKutta4
+from modeling.model import Model
+from modeling.integrators import RungeKutta4
 from abc import abstractmethod
-from numpy import zeros
+from numpy import zeros, ndarray
 
-class DynamicSystem(PhysicalProcess):
+class DynamicSystem(Model):
     def __init__(self, n_states: int, n_inputs: int, n_outputs: int):
         super().__init__()
         self.integrator = RungeKutta4() 
@@ -47,3 +47,4 @@ class LinearSystem(DynamicSystem):
     def output_equation(self, x: ndarray, u: ndarray, t: float) -> ndarray: 
         y = self.C @ x + self.D @ u
         return y
+
