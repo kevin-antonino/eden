@@ -21,6 +21,10 @@ class DynamicSystem(Model):
         self.output  = self.output_equation(
             self.state, self.input, self.get_timestamp())
 
+    def initialize(self):
+        self.output  = self.output_equation(
+            self.state, self.input, self.get_timestamp())
+
     @abstractmethod
     def dynamic_equation(self, x: ndarray, u: ndarray, t: float) -> ndarray:
         '''

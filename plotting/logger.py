@@ -4,67 +4,44 @@ from modeling.model import Model
 from infrastructure.messages import *
 from math import ceil
 from numpy import concatenate
-from plotting.plotting import plot_trajectory
+from plotting.plots import plot_trajectory
+
+class Log:
+    def __init__(self, n_samples):
+        self.max_idx = n_samples
+        self.idx = 0
+        self.state = [None]*n_samples
+        self.output = [None]*n_samples
+        self.time = [None]*n_samples
+
+    def append(self, state, output, time):
+        if self.idx > self.max_idx:
+            raise IndexError(f'Cannot append. Max log elements: {self.max_idx}')
+        else:
+            self.state[self.idx] = state
+            self.output[self.idx] = output
+            self.time[self.idx] = time
+            self.idx += 1
 
 class Logger(Node):
     def __init__(self):
         super().__init__()
         ## Fix these later
-        self.channels = []
         self.name = 'logger'
         self.t0 = 0
         self.tf = 1
-
-        ## Logging contents. Perhaps move to a separate class
-        self.index = 0
-        self.state_log  = None
-        self.output_log = None
-        self.time_log = None
-    
-    def engaged(self):
-        msg = self.mailbox.pop_event()
-        if msg:
-            self.process_event(msg)
-
-    def disengaged(self):
-        pass
-
-    def initialize(self):
-        process = self.channels[0] # Will break for multi channel
-        # Pre-allocate arrays 
-        n = ceil((process.tf - process.t0) * process.frequency + 1)
-        self.state_log = [None]*n
-        self.output_log = [None]*n
-        self.time_log = [None]*n
+        self.logs = {}
    
-    def log(self, data: deque):
+    def log(self, data: deque, model):
         while data:
             (state, output, time) = data.popleft()
-            self.state_log[self.index] = state
-            self.output_log[self.index] = output
-            self.time_log[self.index] = time
-            self.index += 1
-    
-    def process_event(self, msg):
-        match msg.action:
-            case EventActions.START:
-                print(f'{self.name}: Got start message')
-
-            case EventActions.SIM_COMPLETE:
-                print(f'{msg.receiver.name}: Notified that {msg.sender.name} is done!')
-                self.mailbox.disconnect_sender(msg.sender)
-                #self.channels.remove(msg.sender)
-                #if not self.channels:
-                self.finish()
-                for actor in self.mailbox.get_senders():
-                    msg = Event(self.get_address(), actor.get_address(), EventActions.SIM_COMPLETE, self.tf)
-                    self.send(msg)
+            self.logs[model].append(state, output, time)
 
     def process_signal(self, msg):
         match msg.action:
             case SignalActions.LOG:
                 #print(f'{self.name} is logging data from {msg.sender.name} valid at {msg.timestamp}')
-                self.log(msg.payload)
+                self.log(msg.payload, msg.sender)
 
             case _:
                 raise ValueError(f'{self.name:} I dont know what to do with this message')
@@ -72,13 +49,24 @@ class Logger(Node):
     def listen_to(self, model: Model):
         self.link_to(model.get_address())
         model.logger = self
-        self.channels.append(model)
+        n = ceil((model.tf - model.t0) * model.frequency + 1)
+        self.logs[model.get_address()] = Log(n)
 
     def plot_state(self):
         # assuming state is a numpy array...
-        state_trajectory = concatenate(self.state_log, axis=1)
-        plot_trajectory(state_trajectory, self.time_log, 'x')
+        for log in self.logs.values():
+            state_trajectory = concatenate(log.state, axis=1)
+            plot_trajectory(state_trajectory, log.time, 'x')
 
     def finishing(self):
+        pass
+
+    def engaged(self):
+        pass
+
+    def disengaged(self):
+        pass
+
+    def initialize(self):
         pass
 

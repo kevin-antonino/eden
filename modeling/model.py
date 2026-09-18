@@ -104,6 +104,12 @@ class Model(Actor):
                 
                 if self.get_timestamp() == self.tf:
                     self.scheduler.finish()
+                    self.finish()
+                    if self.logger:
+                        self.flush_log()
+                    for actor in self.scheduler.mailbox.get_senders():
+                        msg = Event(self.get_address(), actor.get_address(), EventActions.SIM_COMPLETE, self.get_timestamp())
+                        self.send(msg)
                     self.statemachine.trigger('END_MESSAGE')
 
                 elif not self.inputs_valid():
@@ -125,17 +131,6 @@ class Model(Actor):
             case ModelStates.FINISHING:
                 # Consume remaining messages at this timestamp
                 self.process_available_events()
-                if self.scheduler.get_next_event_time() is None: # No more events to sim
-                    self.finish()
-                    if self.logger:
-                        self.flush_log()
-                    for actor in self.scheduler.mailbox.get_senders():
-                        msg = Event(self.get_address(), actor.get_address(), EventActions.SIM_COMPLETE, self.get_timestamp())
-                        self.send(msg)
-                    if self.logger:
-                        msg = Event(self.get_address(), self.logger.get_address(), EventActions.SIM_COMPLETE, self.get_timestamp())
-                        self.send(msg)
-
     
     def evolve(self):
         # Update internal state by dt
