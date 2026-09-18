@@ -177,8 +177,15 @@ class Model(Actor):
                 self.send(msg)
             
             case EventActions.DATA_VALID:
-                if self.get_next_timestamp() < self.tf:
+                if self.tick == 1:
+                    msg = Event(self.get_address(), msg.sender, EventActions.DATA_REQUEST, self.get_timestamp()) # fix model get address here
+                    self.send(msg)
+
+                elif self.get_next_timestamp() < self.tf:
                     msg = Event(self.get_address(), msg.sender, EventActions.DATA_REQUEST, self.get_next_timestamp()) # fix model get address here
+                    self.send(msg)
+                else:
+                    msg = Event(self.get_address(), msg.sender, EventActions.DATA_REQUEST, self.get_timestamp()) # fix model get address here
                     self.send(msg)
 
             case EventActions.START:
