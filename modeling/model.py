@@ -95,7 +95,7 @@ class Model(Actor):
                     msg = Event(self.get_address(), model.get_address(), EventActions.DATA_REQUEST, self.get_timestamp()) # fix model get address here
                     self.send(msg)
 
-                if not self.inputs_valid():
+                if not self.inputs_valid(): # Choose between waiting or processing
                     self.statemachine.trigger('NEED_INPUTS')
                 else:
                     self.statemachine.trigger('READY')
@@ -164,7 +164,7 @@ class Model(Actor):
                 self.send(msg)
             
             case EventActions.DATA_VALID:
-                if self.get_timestamp() == self.tf:
+                if self.get_state() == ModelStates.FINISHING:
                     return
 
                 self.statemachine.trigger('NEED_INPUTS') # Transition to waiting
