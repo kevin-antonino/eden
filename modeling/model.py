@@ -27,7 +27,9 @@ class ModelStateMachine(StateMachine):
         self.set_init_state(ModelStates.INITIALIZING)
 
     def initializing_transition(self, trig_txt):
-        if trig_txt == 'INITIALIZED':
+        if trig_txt == 'READY':
+            return ModelStates.PROCESSING
+        elif trig_txt == 'NEED_INPUTS':
             return ModelStates.WAITING
         else:
             return None
@@ -92,7 +94,11 @@ class Model(Actor):
                 for model in self.input_validity_horizon.keys():
                     msg = Event(self.get_address(), model.get_address(), EventActions.DATA_REQUEST, self.get_timestamp()) # fix model get address here
                     self.send(msg)
-                self.statemachine.trigger('INITIALIZED')
+
+                if not self.inputs_valid():
+                    self.statemachine.trigger('NEED_INPUTS')
+                else:
+                    self.statemachine.trigger('READY')
 
             case ModelStates.WAITING: # Model is blocked because its waiting for inputs
                 self.process_available_events()
@@ -135,7 +141,7 @@ class Model(Actor):
         if not self.input_validity_horizon:
             return True
         else:
-            return all(validity_time >= self.get_timestamp() for validity_time in self.input_validity_horizon.values())
+            return all([valid_end_time >= self.get_timestamp() for valid_end_time in self.input_validity_horizon.values()])
 
     def process_event(self, msg):
         if self.get_next_timestamp() < msg.timestamp: # Can only process msgs in [t, t+dt)
