@@ -41,6 +41,8 @@ class ModelStateMachine(StateMachine):
             return ModelStates.WAITING
         elif trig_txt == 'INPUTS_READY':
             return ModelStates.SYNC
+        elif trig_txt == 'END_MESSAGE':
+            return ModelStates.FINISHING
         else:
             return None
 
@@ -63,6 +65,8 @@ class ModelStateMachine(StateMachine):
     def evolving_transition(self, trig_txt):
         if trig_txt == 'EVOLVED':
             return ModelStates.WAITING
+        elif trig_txt == 'END_MESSAGE':
+            return ModelStates.FINISHING
         else:
             return None
 
@@ -135,7 +139,19 @@ class Model(Actor):
                 if self.logger:
                     self.log()
                 self.request_inputs()
-                self.statemachine.trigger('EVOLVED') # Transition back to waiting
+
+                if self.get_timestamp() == self.tf:
+                    self.scheduler.finish()
+                    self.finish()
+                    if self.logger:
+                        self.flush_log()
+                    for actor in self.scheduler.mailbox.get_senders():
+                        msg = Event(self.get_address(), actor.get_address(), EventActions.SIM_COMPLETE, self.get_timestamp())
+                        self.send(msg)
+                    self.statemachine.trigger('END_MESSAGE')
+
+                else:
+                    self.statemachine.trigger('EVOLVED') # Transition back to waiting
 
             case ModelStates.FINISHING:
                 # Consume remaining messages at this timestamp
@@ -160,7 +176,7 @@ class Model(Actor):
         if not self.input_validity_horizon:
             return True
         else:
-            return all([valid_end_time >= self.get_timestamp() for valid_end_time in self.input_validity_horizon.values()])
+            return all([valid_end_time >= self.get_next_timestamp() for valid_end_time in self.input_validity_horizon.values()])
     
     def outputs_valid(self):
         if not self.output_validity_horizon:
@@ -176,13 +192,13 @@ class Model(Actor):
 
     def request_inputs(self):
         for model in self.input_validity_horizon.keys():
-            if self.input_validity_horizon[model] <= self.get_timestamp():
+            if self.input_validity_horizon[model] <= self.get_next_timestamp():
                 msg = Event(self.get_address(), model.get_address(), EventActions.DATA_REQUEST, self.get_timestamp(), self.get_next_timestamp()) # fix model get address here
                 self.send(msg)
 
     def send_null_messages(self):
         for model in self.output_validity_horizon.keys():
-            msg = Event(self.get_address(), model, EventActions.DATA_VALID, self.output_validity_horizon[model])
+            msg = Event(self.get_address(), model, EventActions.DATA_VALID, min(self.output_validity_horizon[model], self.input_validity_horizon[model]))
             self.send(msg)
 
     def process_event(self, msg):
@@ -245,14 +261,6 @@ class Model(Actor):
             
             case EventActions.TERMINATE:
                 print(f'{self}: End message Received. {self} has reached tf')
-                self.scheduler.finish()
-                self.finish()
-                if self.logger:
-                    self.flush_log()
-                for actor in self.scheduler.mailbox.get_senders():
-                    msg = Event(self.get_address(), actor.get_address(), EventActions.SIM_COMPLETE, self.get_timestamp())
-                    self.send(msg)
-                self.statemachine.trigger('END_MESSAGE')
 
             case EventActions.SIM_COMPLETE:
                 print(f'{self.name}: Notified that {msg.sender.name} is done!')
