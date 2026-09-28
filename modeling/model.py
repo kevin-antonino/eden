@@ -39,10 +39,10 @@ class ModelStateMachine(StateMachine):
     def waiting_transition(self, trig_txt):
         if trig_txt == 'NEED_INPUTS':
             return ModelStates.WAITING
-        elif trig_txt == 'INPUTS_READY':
+        elif trig_txt == 'READY':
+            return ModelStates.PROCESSING
+        elif trig_txt == 'NEED_SYNC':
             return ModelStates.SYNC
-        elif trig_txt == 'END_MESSAGE':
-            return ModelStates.FINISHING
         else:
             return None
 
@@ -55,8 +55,6 @@ class ModelStateMachine(StateMachine):
     def processing_transition(self, trig_txt):
         if trig_txt == 'INCREMENT_TIME':
             return ModelStates.EVOLVING
-        elif trig_txt == 'NEED_INPUTS':
-            return ModelStates.WAITING
         elif trig_txt == 'END_MESSAGE':
             return ModelStates.FINISHING
         else:
@@ -88,12 +86,13 @@ class Model(Actor):
         self.frequency = 10 
         self.tick = 0
 
-        ## Communication ## 
+        ## Syncronization ## 
         self.input_validity_horizon = {}
         self.output_validity_horizon = {}
-        self.logger = None
+        self.sync_times = {}
 
         ## Logging ##
+        self.logger = None
         self.batch_size = 1000
         self.log_buffer = deque()
 
@@ -115,8 +114,11 @@ class Model(Actor):
                 self.process_available_events()
 
                 if self.inputs_valid():
-                    self.statemachine.trigger('INPUTS_READY') # Transition to processing. Inputs valid at t
-                    print(f'{self.name}: Transitioning to SYNC')
+                    if self.need_to_sync():
+                        print(f'{self.name}: Transitioning to SYNC')
+                        self.statemachine.trigger('NEED_SYNC')
+                    else:
+                        self.statemachine.trigger('READY') # Transition to processing. Inputs valid at t
 
             case ModelStates.SYNC:
                 self.process_available_events()
@@ -184,6 +186,12 @@ class Model(Actor):
         else:
             return all([valid_end_time >= self.get_next_timestamp() for valid_end_time in self.output_validity_horizon.values()])
 
+    def need_to_sync(self):
+        if not self.sync_times:
+            return False
+        else:
+            return any([time < self.get_next_timestamp() for time in self.sync_times.values()])
+
     def safe_to_evolve(self):
         if self.scheduler.get_next_event_time() and self.scheduler.get_next_event_time() >= self.get_next_timestamp():
             return True
@@ -198,7 +206,9 @@ class Model(Actor):
 
     def send_null_messages(self):
         for model in self.output_validity_horizon.keys():
-            msg = Event(self.get_address(), model, EventActions.DATA_VALID, min(self.output_validity_horizon[model], self.input_validity_horizon[model]))
+            nmt = min(self.output_validity_horizon[model], self.input_validity_horizon[model])
+            self.sync_times[model] = nmt
+            msg = Event(self.get_address(), model, EventActions.DATA_VALID, nmt)
             self.send(msg)
 
     def process_event(self, msg):
@@ -310,6 +320,7 @@ class Model(Actor):
        p.link_to(self) # P will wait for self's message
        self.link_to(p)
        p.input_validity_horizon[self.get_address()] = -float('inf') 
+       self.sync_times[p.get_address()] = 0
 
     def get_timestamp(self):
         return self.tick / self.frequency 
