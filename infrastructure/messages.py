@@ -17,7 +17,7 @@ class EventActions(Enum):
     TERMINATE       = auto()
     DATA_REQUEST    = auto() 
     DATA_PUSH       = auto()
-    DATA_VALID      = auto()
+    SYNCRONIZE      = auto()
     SIM_COMPLETE    = auto()
 
 @dataclass(frozen=True)

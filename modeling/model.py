@@ -199,7 +199,7 @@ class Model(Actor):
     def send_sync_messages(self):
         for model in self.output_validity_horizon.keys():
             self.sync_times[model] = min(self.output_validity_horizon[model], self.input_validity_horizon[model])
-            msg = Event(self.get_address(), model, EventActions.DATA_VALID, self.sync_times[model])
+            msg = Event(self.get_address(), model, EventActions.SYNCRONIZE, self.sync_times[model])
             self.send(msg)
 
     def process_event(self, msg):
@@ -223,7 +223,7 @@ class Model(Actor):
                 self.send(msg)
                 print(f'{self.name} is sending input to {msg.sender.name} at {msg.timestamp} valid until {data_valid}')
             
-            case EventActions.DATA_VALID:
+            case EventActions.SYNCRONIZE:
                 pass
 
             case EventActions.START:
