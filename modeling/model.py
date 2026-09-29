@@ -12,7 +12,7 @@ from infrastructure.messages import *
 class ModelStates(Enum):
     INITIALIZING = auto()
     WAITING      = auto()
-    SYNC         = auto()
+    SYNCING         = auto()
     PROCESSING   = auto() 
     EVOLVING     = auto() 
     FINISHING    = auto()
@@ -22,31 +22,27 @@ class ModelStateMachine(StateMachine):
         super().__init__()
         self.add_state(ModelStates.INITIALIZING, self.initializing_transition)
         self.add_state(ModelStates.WAITING, self.waiting_transition)
-        self.add_state(ModelStates.SYNC, self.sync_transition)
+        self.add_state(ModelStates.SYNCING, self.syncing_transition)
         self.add_state(ModelStates.PROCESSING, self.processing_transition)
         self.add_state(ModelStates.EVOLVING, self.evolving_transition)
         #self.add_state(ModelStates.FINISHING)
         self.set_init_state(ModelStates.INITIALIZING)
 
     def initializing_transition(self, trig_txt):
-        if trig_txt == 'READY':
-            return ModelStates.PROCESSING
-        elif trig_txt == 'NEED_INPUTS':
+        if trig_txt == 'INITIALIZED':
             return ModelStates.WAITING
         else:
             return None
 
     def waiting_transition(self, trig_txt):
-        if trig_txt == 'NEED_INPUTS':
-            return ModelStates.WAITING
-        elif trig_txt == 'READY':
+        if trig_txt == 'READY':
             return ModelStates.PROCESSING
         elif trig_txt == 'NEED_SYNC':
-            return ModelStates.SYNC
+            return ModelStates.SYNCING
         else:
             return None
 
-    def sync_transition(self, trig_txt):
+    def syncing_transition(self, trig_txt):
         if trig_txt == 'SYNC_DONE':
             return ModelStates.PROCESSING
         else:
@@ -103,12 +99,8 @@ class Model(Actor):
             case ModelStates.INITIALIZING:
                 self.initialize()
                 self.log()
-                for model in self.input_validity_horizon.keys():
-                    msg = Event(self.get_address(), model.get_address(), EventActions.DATA_REQUEST, self.get_timestamp(), self.get_next_timestamp()) # fix model get address here
-                    self.send(msg)
-
-                # Start model at WAITING
-                self.statemachine.trigger('NEED_INPUTS')
+                self.request_inputs()
+                self.statemachine.trigger('INITIALIZED') # Start model at WAITING
 
             case ModelStates.WAITING: # Model is blocked because its waiting for inputs
                 self.process_available_events()
@@ -120,11 +112,11 @@ class Model(Actor):
                     else:
                         self.statemachine.trigger('READY') # Transition to processing. Inputs valid at t
 
-            case ModelStates.SYNC:
+            case ModelStates.SYNCING:
                 self.process_available_events()
 
                 if self.outputs_valid():
-                    self.send_null_messages()
+                    self.send_sync_messages()
                     self.statemachine.trigger('SYNC_DONE')
 
             case ModelStates.PROCESSING: # Model is processing events within [t, t+dt). All inputs valid at t. 
@@ -140,7 +132,6 @@ class Model(Actor):
                 self.increment_time()
                 if self.logger:
                     self.log()
-                self.request_inputs()
 
                 if self.get_timestamp() == self.tf:
                     self.scheduler.finish()
@@ -153,6 +144,7 @@ class Model(Actor):
                     self.statemachine.trigger('END_MESSAGE')
 
                 else:
+                    self.request_inputs()
                     self.statemachine.trigger('EVOLVED') # Transition back to waiting
 
             case ModelStates.FINISHING:
@@ -204,11 +196,10 @@ class Model(Actor):
                 msg = Event(self.get_address(), model.get_address(), EventActions.DATA_REQUEST, self.get_timestamp(), self.get_next_timestamp()) # fix model get address here
                 self.send(msg)
 
-    def send_null_messages(self):
+    def send_sync_messages(self):
         for model in self.output_validity_horizon.keys():
-            nmt = min(self.output_validity_horizon[model], self.input_validity_horizon[model])
-            self.sync_times[model] = nmt
-            msg = Event(self.get_address(), model, EventActions.DATA_VALID, nmt)
+            self.sync_times[model] = min(self.output_validity_horizon[model], self.input_validity_horizon[model])
+            msg = Event(self.get_address(), model, EventActions.DATA_VALID, self.sync_times[model])
             self.send(msg)
 
     def process_event(self, msg):
@@ -220,12 +211,6 @@ class Model(Actor):
                 (self.input, sample_end) = msg.payload
                 validity_end_time = max(sample_end, self.get_next_timestamp())
                 self.input_validity_horizon[msg.sender] = validity_end_time
-
-                #nmt = self.get_null_msg_time(msg.sender)
-                #msg = Event(self.get_address(), msg.sender, EventActions.DATA_VALID, nmt)
-                #self.send(msg)
-                #if self.inputs_valid(): 
-                #    self.statemachine.trigger('INPUTS_READY') # Transition to processing
                 print(f'{self.name} is pulling input from {msg.sender.name} valid at {msg.timestamp} to {validity_end_time}')
 
             case EventActions.DATA_REQUEST: 
@@ -233,36 +218,13 @@ class Model(Actor):
                 request_time = msg.payload
                 output_model = msg.sender
                 data_valid = max(self.get_next_timestamp(), request_time)
-                #data_valid = self.get_next_timestamp()
                 self.output_validity_horizon[output_model] = data_valid
                 msg = Event(self.get_address(), output_model, EventActions.DATA_PUSH, self.get_timestamp(), (self.output, data_valid))
                 self.send(msg)
-
-                #nmt = self.get_null_msg_time(output_model)
-                #msg = Event(self.get_address(), output_model, EventActions.DATA_VALID, nmt)
-                #self.send(msg)
-                #else:
-                #    raise ValueError(f'Bad request time {request_time}')
                 print(f'{self.name} is sending input to {msg.sender.name} at {msg.timestamp} valid until {data_valid}')
             
             case EventActions.DATA_VALID:
                 pass
-                '''
-                if self.get_state() == ModelStates.FINISHING:
-                    return
-
-                #self.statemachine.trigger('NEED_INPUTS') # Transition to waiting
-                if msg.timestamp != self.input_validity_horizon[msg.sender.get_address()]:
-                    raise ValueError("something in the validity timekeeping is f'ed up")
-
-                if msg.timestamp == self.get_timestamp():
-                    request_time = self.get_timestamp()
-                else:
-                    request_time = self.get_next_timestamp()
-
-                msg = Event(self.get_address(), msg.sender, EventActions.DATA_REQUEST, self.get_timestamp(), request_time)
-                self.send(msg)
-                '''
 
             case EventActions.START:
                 print(f'{self.name}: Opened Begin message. Starting at {self.get_timestamp()}')
