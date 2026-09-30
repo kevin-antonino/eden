@@ -244,16 +244,16 @@ class Model(Actor):
 
             case ModelStates.WAITING: # Model is blocked because its waiting for inputs
                 self.process_available_events()
-                #print( self.synchronizer.get_state())
 
-                if self.synchronizer.get_state() == SyncStates.REQUEST:
-                    self.request_inputs()
+                match self.synchronizer.get_state():
+                    case SyncStates.REQUEST:
+                        self.request_inputs()
+                    
+                    case SyncStates.SYNC:
+                        self.send_sync_messages()
 
-                if self.synchronizer.get_state() == SyncStates.SYNC:
-                    self.send_sync_messages()
-
-                if self.synchronizer.get_state() == SyncStates.PASS:
-                    self.statemachine.trigger('SYNC_DONE')
+                    case SyncStates.PASS:
+                        self.statemachine.trigger('SYNC_DONE')
 
             case ModelStates.PROCESSING: # Model is processing events within [t, t+dt). All inputs valid at t. 
                 self.process_available_events()
