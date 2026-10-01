@@ -8,10 +8,12 @@ from infrastructure.util import StateMachine
 from infrastructure.node import Actor
 from infrastructure.scheduler import Scheduler
 from infrastructure.messages import *
+from modeling.synchronizer import Synchronizer, SyncStates
 
 class ModelStates(Enum):
     INITIALIZING = auto()
     WAITING      = auto()
+    SYNCING      = auto()
     PROCESSING   = auto() 
     EVOLVING     = auto() 
     FINISHING    = auto()
@@ -21,6 +23,7 @@ class ModelStateMachine(StateMachine):
         super().__init__()
         self.add_state(ModelStates.INITIALIZING, self.initializing_transition)
         self.add_state(ModelStates.WAITING, self.waiting_transition)
+        self.add_state(ModelStates.SYNCING, self.syncing_transition)
         self.add_state(ModelStates.PROCESSING, self.processing_transition)
         self.add_state(ModelStates.EVOLVING, self.evolving_transition)
         #self.add_state(ModelStates.FINISHING)
@@ -28,14 +31,20 @@ class ModelStateMachine(StateMachine):
 
     def initializing_transition(self, trig_txt):
         if trig_txt == 'INITIALIZED':
-            return ModelStates.PROCESSING
+            return ModelStates.WAITING
         else:
             return None
 
     def waiting_transition(self, trig_txt):
-        if trig_txt == 'NEED_INPUTS':
-            return ModelStates.WAITING
-        elif trig_txt == 'INPUTS_READY':
+        if trig_txt == 'SYNC_DONE':
+            return ModelStates.PROCESSING
+        elif trig_txt == 'NEED_SYNC':
+            return ModelStates.SYNCING
+        else:
+            return None
+
+    def syncing_transition(self, trig_txt):
+        if trig_txt == 'SYNC_DONE':
             return ModelStates.PROCESSING
         else:
             return None
@@ -43,8 +52,6 @@ class ModelStateMachine(StateMachine):
     def processing_transition(self, trig_txt):
         if trig_txt == 'INCREMENT_TIME':
             return ModelStates.EVOLVING
-        elif trig_txt == 'NEED_INPUTS':
-            return ModelStates.WAITING
         elif trig_txt == 'END_MESSAGE':
             return ModelStates.FINISHING
         else:
@@ -52,7 +59,9 @@ class ModelStateMachine(StateMachine):
 
     def evolving_transition(self, trig_txt):
         if trig_txt == 'EVOLVED':
-            return ModelStates.PROCESSING
+            return ModelStates.WAITING
+        elif trig_txt == 'END_MESSAGE':
+            return ModelStates.FINISHING
         else:
             return None
 
@@ -60,6 +69,7 @@ class Model(Actor):
     TIME_TOL = 0.001
     def __init__(self):
         self.name = ''
+        self.synchronizer = Synchronizer()
         self.scheduler = Scheduler()
         self.statemachine = ModelStateMachine()
 
@@ -74,34 +84,50 @@ class Model(Actor):
         self.frequency = 10 
         self.tick = 0
 
-        ## Communication ## 
-        self.input_validity_times = {}
-        self.logger = None
-
         ## Logging ##
+        self.logger = None
         self.batch_size = 1000
         self.log_buffer = deque()
 
     def execute(self):
         self.scheduler.execute()
-        #print(f'{self.name}: {self.statemachine}')
+        #print(f'{self.name}: {self.statemachine} {self.synchronizer.statemachine}')
         match self.get_state():
             case ModelStates.INITIALIZING:
                 self.initialize()
+                self.synchronizer.initialize(self.get_timestamp(), self.get_next_timestamp())
                 self.log()
-                for model in self.input_validity_times.keys():
-                    msg = Event(self.get_address(), model.get_address(), EventActions.DATA_REQUEST, self.get_timestamp()) # fix model get address here
-                    self.send(msg)
-                self.statemachine.trigger('INITIALIZED')
+                self.request_inputs()
+                self.statemachine.trigger('INITIALIZED') # Start model at WAITING
 
             case ModelStates.WAITING: # Model is blocked because its waiting for inputs
                 self.process_available_events()
-                if self.inputs_valid(): 
-                    self.statemachine.trigger('INPUTS_READY') # Transition to processing
 
-            case ModelStates.PROCESSING: # Inputs are valid and Model is processing events within [t, t+dt)
+                match self.synchronizer.get_state():
+                    case SyncStates.REQUEST:
+                        self.request_inputs()
+                    
+                    case SyncStates.SYNC:
+                        self.send_sync_messages()
+
+                    case SyncStates.PASS:
+                        self.statemachine.trigger('SYNC_DONE')
+
+            case ModelStates.PROCESSING: # Model is processing events within [t, t+dt). All inputs valid at t. 
                 self.process_available_events()
                 
+                # if all events occur >= t+dt, it is safe to evolve
+                if self.safe_to_evolve():
+                    self.statemachine.trigger('INCREMENT_TIME') # Transition to evolving
+
+            case ModelStates.EVOLVING: # Model progressing time. Unblocked, inputs valid, and all events occur >= t+dt
+                print(f'{self.name}: Evolving from {self.get_timestamp()} to {self.get_next_timestamp()}')
+                self.evolve()
+                self.increment_time()
+                self.synchronizer.advance_time(self.get_next_timestamp())
+                if self.logger:
+                    self.log()
+
                 if self.get_timestamp() == self.tf:
                     self.scheduler.finish()
                     self.finish()
@@ -112,21 +138,8 @@ class Model(Actor):
                         self.send(msg)
                     self.statemachine.trigger('END_MESSAGE')
 
-                elif not self.inputs_valid():
-                    self.statemachine.trigger('NEED_INPUTS') # Transition to waiting
-
                 else:
-                    if self.scheduler.get_next_event_time() is not None:
-                        if self.scheduler.get_next_event_time() >= self.get_next_timestamp():
-                            self.statemachine.trigger('INCREMENT_TIME') # Transition to evolving
-
-            case ModelStates.EVOLVING: # Model progressing time
-                print(f'{self.name}: Evolving from {self.get_timestamp()} to {self.get_next_timestamp()}')
-                self.evolve()
-                self.increment_time()
-                if self.logger:
-                    self.log()
-                self.statemachine.trigger('EVOLVED') # Transition to processing
+                    self.statemachine.trigger('EVOLVED') # Transition back to waiting
 
             case ModelStates.FINISHING:
                 # Consume remaining messages at this timestamp
@@ -134,7 +147,7 @@ class Model(Actor):
     
     def evolve(self):
         # Update internal state by dt
-        print(f'{self.name}: Evolving from {self.get_timestamp()} to {self.get_next_timestamp()}')
+        pass
 
     def increment_time(self):
         self.tick += 1
@@ -147,11 +160,23 @@ class Model(Actor):
                 event = self.scheduler.pop_next_event()
                 self.process_event(event)
 
-    def inputs_valid(self):
-        if not self.input_validity_times:
+    def safe_to_evolve(self):
+        if self.scheduler.get_next_event_time() and self.scheduler.get_next_event_time() >= self.get_next_timestamp():
             return True
         else:
-            return all(validity_time >= self.get_timestamp() for validity_time in self.input_validity_times.values())
+            return False
+
+    def request_inputs(self):
+        for model in self.synchronizer.get_request_list():
+            msg = Event(self.get_address(), model.get_address(), EventActions.DATA_REQUEST, self.get_timestamp(), self.get_next_timestamp()) # fix model get address here
+            self.send(msg)
+        self.synchronizer.request_sent()
+
+    def send_sync_messages(self):
+        for model in self.synchronizer.get_sync_list():
+            sync_time = self.synchronizer.calc_sync_time(model)
+            msg = Event(self.get_address(), model, EventActions.SYNCRONIZE, sync_time)
+            self.send(msg)
 
     def process_event(self, msg):
         if self.get_next_timestamp() < msg.timestamp: # Can only process msgs in [t, t+dt)
@@ -159,29 +184,22 @@ class Model(Actor):
 
         match msg.action:
             case EventActions.DATA_PUSH:
-                print(f'{self.name} is pulling input from {msg.sender.name} valid at {msg.timestamp}')
-                (self.input, validity_end_time) = msg.payload
-                self.input_validity_times[msg.sender] = validity_end_time
+                (self.input, sample_end) = msg.payload
+                self.synchronizer.set_input_sample(msg.sender, msg.timestamp, sample_end)
+                #print(f'{self.name} is pulling input from {msg.sender.name} valid at {msg.timestamp} to {validity_end_time}')
 
             case EventActions.DATA_REQUEST: 
                 # data will be pushed with a valid time <= this model's timestamp
-                sender = msg.sender
-                msg = Event(self.get_address(), sender, EventActions.DATA_PUSH, self.get_timestamp(), (self.output, self.get_next_timestamp()))
+                request_time = msg.payload
+                output_model = msg.sender
+                data_valid = max(self.get_next_timestamp(), request_time)
+                self.synchronizer.set_output_sample(msg.sender, msg.timestamp, data_valid)
+                msg = Event(self.get_address(), output_model, EventActions.DATA_PUSH, self.get_timestamp(), (self.output, data_valid))
                 self.send(msg)
-                msg = Event(self.get_address(), sender, EventActions.DATA_VALID, self.get_next_timestamp())
-                self.send(msg)
+                print(f'{self.name} is sending input to {msg.sender.name} at {msg.timestamp} valid until {data_valid}')
             
-            case EventActions.DATA_VALID:
-                if self.tick == 1:
-                    msg = Event(self.get_address(), msg.sender, EventActions.DATA_REQUEST, self.get_timestamp()) # fix model get address here
-                    self.send(msg)
-
-                elif self.get_next_timestamp() < self.tf:
-                    msg = Event(self.get_address(), msg.sender, EventActions.DATA_REQUEST, self.get_next_timestamp()) # fix model get address here
-                    self.send(msg)
-                else:
-                    msg = Event(self.get_address(), msg.sender, EventActions.DATA_REQUEST, self.get_timestamp()) # fix model get address here
-                    self.send(msg)
+            case EventActions.SYNCRONIZE:
+                pass
 
             case EventActions.START:
                 print(f'{self.name}: Opened Begin message. Starting at {self.get_timestamp()}')
@@ -194,8 +212,8 @@ class Model(Actor):
             case EventActions.SIM_COMPLETE:
                 print(f'{self.name}: Notified that {msg.sender.name} is done!')
                 self.scheduler.mailbox.disconnect_sender(msg.sender.get_address())
-                if self.input_validity_times:
-                    self.input_validity_times.pop(msg.sender.get_address())
+                if self.input_validity_horizons:
+                    self.input_validity_horizons.pop(msg.sender.get_address())
 
             case _:
                 raise ValueError(f'{self.name:} I dont know what to do with this message')
@@ -238,7 +256,8 @@ class Model(Actor):
     def cascade_into(self, p):
        p.link_to(self) # P will wait for self's message
        self.link_to(p)
-       p.input_validity_times[self.get_address()] = -1
+       self.synchronizer.set_output_model(p.get_address())
+       p.synchronizer.set_input_model(self.get_address())
 
     def get_timestamp(self):
         return self.tick / self.frequency 
