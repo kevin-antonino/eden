@@ -27,7 +27,7 @@ class StateMachine(ABC):
             #    raise ValueError(f'{next_state.name} isn\'t a state in this machine')
             self.state = next_state
         else:
-            self.bad_transition()
+            self.bad_transition(trig_txt)
 
     def __call__(self, trig_txt):
         self.trigger(trig_txt)
@@ -35,8 +35,8 @@ class StateMachine(ABC):
     def get_state(self):
         return self.state
     
-    def bad_transition(self):
-        raise ValueError(f'Unknown trigger text for {self}')
+    def bad_transition(self, trig_txt):
+        raise ValueError(f'Unknown trigger text {trig_txt} for {self}')
 
 class TreeNode():
     def __init__(self, p):

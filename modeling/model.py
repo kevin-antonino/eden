@@ -77,7 +77,7 @@ class SynchronizerStateMachine(StateMachine):
         self.add_state(SyncStates.SYNC, self.sync_transition)
         self.add_state(SyncStates.HOLD, self.hold_transition)
         self.add_state(SyncStates.PASS, self.pass_transition)
-        self.set_init_state(SyncStates.HOLD)
+        self.set_init_state(SyncStates.REQUEST)
 
     def request_transition(self, trig_txt):
         if trig_txt == 'REQUEST_SENT':
@@ -113,8 +113,8 @@ class Synchronizer():
     def __init__(self):
         self.statemachine = SynchronizerStateMachine()
         self.model_validity_horizon = (float('nan'), float('nan'))
-        self.input_validity_horizon = {}
-        self.output_validity_horizon = {}
+        self.input_validity_horizons = {}
+        self.output_validity_horizons = {}
         self.sync_times = {}
      
     def update_state(self):
@@ -143,12 +143,12 @@ class Synchronizer():
 
     def set_input_sample(self, model, sample_t0, sample_tf):
         validity_end_time = max(sample_tf, self.model_validity_horizon[1])
-        self.input_validity_horizon[model] = (sample_t0, validity_end_time)
+        self.input_validity_horizons[model] = (sample_t0, validity_end_time)
         self.update_state()
 
     def set_output_sample(self, model, sample_t0, sample_tf):
         validity_end_time = max(sample_tf, self.model_validity_horizon[1])
-        self.output_validity_horizon[model] = (sample_t0, validity_end_time)
+        self.output_validity_horizons[model] = (sample_t0, validity_end_time)
         self.update_state()
 
     def advance_time(self, tf):
@@ -156,29 +156,41 @@ class Synchronizer():
         self.update_state()
     
     def calc_sync_time(self, model):
-        self.sync_times[model] = min(self.input_validity_horizon[model][1], self.output_validity_horizon[model][1])
+        self.sync_times[model] = min(self.input_validity_horizons[model][1], self.output_validity_horizons[model][1])
         self.update_state()
         return self.sync_times[model]
 
-    def add_model(self, model):
-        self.input_validity_horizon[model] = (-float('inf'), float('inf'))
-        self.output_validity_horizon[model] = (-float('inf'), float('inf'))
+    def set_input_model(self, model):
+        self.input_validity_horizons[model] = (-float('inf'), -float('inf'))
         self.sync_times[model] = -float('inf')
 
-    def get_models(self):
-        return self.sync_times.keys()
+    def set_output_model(self, model):
+        self.output_validity_horizons[model] = (-float('inf'), -float('inf'))
+        self.sync_times[model] = -float('inf')
+
+    def need_input(self, model):
+        return self.input_validity_horizons[model][1] <= self.model_validity_horizon[1]
+
+    def get_request_list(self):
+        return [model for model in self.input_validity_horizons.keys() if self.need_input(model)]
+    
+    def need_sync(self, model):
+        return self.sync_times[model] < self.model_validity_horizon[1]
+
+    def get_sync_list(self):
+        return [model for model in self.sync_times.keys() if self.need_sync(model)]
 
     def inputs_valid(self):
-        if not self.input_validity_horizon:
+        if not self.input_validity_horizons:
             return True
         else:
-            return all([in_horiz[1] >= self.model_validity_horizon[1] for in_horiz in self.input_validity_horizon.values()])
+            return all([in_horiz[1] >= self.model_validity_horizon[1] for in_horiz in self.input_validity_horizons.values()])
     
     def outputs_valid(self):
-        if not self.output_validity_horizon:
+        if not self.output_validity_horizons:
             return True
         else:
-            return all([out_horiz[1] >= self.model_validity_horizon[1] for out_horiz in self.output_validity_horizon.values()])
+            return all([out_horiz[1] >= self.model_validity_horizon[1] for out_horiz in self.output_validity_horizons.values()])
 
     def need_to_sync(self):
         if not self.sync_times:
@@ -191,12 +203,7 @@ class Synchronizer():
 
     def request_sent(self):
         self.statemachine.trigger('REQUEST_SENT')
-
-    def need_input(self, model):
-        if self.input_validity_horizon[model][1] <= self.model_validity_horizon[1]:
-            return True
-        else:
-            return False
+        self.update_state()
 
     def get_state(self):
         return self.statemachine.get_state()
@@ -227,19 +234,13 @@ class Model(Actor):
 
     def execute(self):
         self.scheduler.execute()
-        #print(f'{self.name}: {self.statemachine}')
+        #print(f'{self.name}: {self.statemachine} {self.synchronizer.statemachine}')
         match self.get_state():
             case ModelStates.INITIALIZING:
                 self.initialize()
                 self.synchronizer.initialize(self.get_timestamp(), self.get_next_timestamp())
                 self.log()
-                for model in self.synchronizer.get_models():
-                    msg = Event(self.get_address(), model.get_address(), EventActions.DATA_REQUEST, self.get_timestamp(), self.get_next_timestamp()) # fix model get address here
-                    self.send(msg)
-
-                if not self.synchronizer.get_models():
-                    self.synchronizer.update_state()
-
+                self.request_inputs()
                 self.statemachine.trigger('INITIALIZED') # Start model at WAITING
 
             case ModelStates.WAITING: # Model is blocked because its waiting for inputs
@@ -309,15 +310,13 @@ class Model(Actor):
             return False
 
     def request_inputs(self):
-        for model in self.synchronizer.get_models():
-            if self.synchronizer.need_input(model):
-                msg = Event(self.get_address(), model.get_address(), EventActions.DATA_REQUEST, self.get_timestamp(), self.get_next_timestamp()) # fix model get address here
-                self.send(msg)
-
+        for model in self.synchronizer.get_request_list():
+            msg = Event(self.get_address(), model.get_address(), EventActions.DATA_REQUEST, self.get_timestamp(), self.get_next_timestamp()) # fix model get address here
+            self.send(msg)
         self.synchronizer.request_sent()
 
     def send_sync_messages(self):
-        for model in self.synchronizer.get_models():
+        for model in self.synchronizer.get_sync_list():
             sync_time = self.synchronizer.calc_sync_time(model)
             msg = Event(self.get_address(), model, EventActions.SYNCRONIZE, sync_time)
             self.send(msg)
@@ -356,8 +355,8 @@ class Model(Actor):
             case EventActions.SIM_COMPLETE:
                 print(f'{self.name}: Notified that {msg.sender.name} is done!')
                 self.scheduler.mailbox.disconnect_sender(msg.sender.get_address())
-                if self.input_validity_horizon:
-                    self.input_validity_horizon.pop(msg.sender.get_address())
+                if self.input_validity_horizons:
+                    self.input_validity_horizons.pop(msg.sender.get_address())
 
             case _:
                 raise ValueError(f'{self.name:} I dont know what to do with this message')
@@ -400,8 +399,8 @@ class Model(Actor):
     def cascade_into(self, p):
        p.link_to(self) # P will wait for self's message
        self.link_to(p)
-       self.synchronizer.add_model(p.get_address())
-       p.synchronizer.add_model(self.get_address())
+       self.synchronizer.set_output_model(p.get_address())
+       p.synchronizer.set_input_model(self.get_address())
 
     def get_timestamp(self):
         return self.tick / self.frequency 
