@@ -161,10 +161,9 @@ class Model(Actor):
                 self.process_event(event)
 
     def safe_to_evolve(self):
-        if self.scheduler.get_next_event_time() and self.scheduler.get_next_event_time() >= self.get_next_timestamp():
-            return True
-        else:
-            return False
+        next_time = self.scheduler.get_next_event_time()
+        return (next_time is not None
+            and next_time >= self.get_next_timestamp())
 
     def request_inputs(self):
         for model in self.synchronizer.get_request_list():
