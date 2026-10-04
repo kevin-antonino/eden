@@ -93,7 +93,13 @@ class Synchronizer():
         self.update_state()
     
     def calc_sync_time(self, model):
-        self.sync_times[model] = min(self.input_validity_horizons[model][1], self.output_validity_horizons[model][1])
+        if model in self.input_validity_horizons and self.output_validity_horizons:
+            self.sync_times[model] = min(self.input_validity_horizons[model][1], self.output_validity_horizons[model][1])
+        elif model in self.input_validity_horizons:
+            self.sync_times[model] = self.input_validity_horizons[model][1]
+        else:
+            self.sync_times[model] = self.output_validity_horizons[model][1]
+        
         self.update_state()
         return self.sync_times[model]
 
