@@ -4,9 +4,10 @@ from modeling.model import Model
 from infrastructure.messages import *
 from math import ceil
 from numpy import concatenate
-from plotting.plots import plot_trajectory
+from plotting.plots import *
+import matplotlib.pyplot as plt
 
-class Log:
+class DataLog:
     def __init__(self, n_samples):
         self.max_idx = n_samples
         self.idx = 0
@@ -23,20 +24,31 @@ class Log:
             self.time[self.idx] = time
             self.idx += 1
 
+class NumericLog(DataLog):
+    def __init__(self, n_samples):
+        super().__init__(n_samples) # consider pre-allocating size of nd-array
+    
+    def overlay_state(self, ax, element=[]):
+        state_trajectory = concatenate(log.state, axis=1)
+        ax = plot_on_ax(axis, self.time, state_trajectory[element], 
+            ylabel='', xlabel='Time [s]')
+        return ax
+
+    def plot_state(self):
+        state_trajectory = concatenate(log.state, axis=1)
+        plot_trajectory(state_trajectory, log.time, 'x')
+    
+    def plot_output(self):
+        output_trajectory = concatenate(log.output, axis=1)
+        plot_trajectory(output_trajectory, log.time, 'y')
+
 class Logger(Node):
     def __init__(self):
         super().__init__()
         ## Fix these later
         self.name = 'logger'
-        self.t0 = 0
-        self.tf = 1
         self.logs = {}
    
-    def log(self, data: deque, model):
-        while data:
-            (state, output, time) = data.popleft()
-            self.logs[model].append(state, output, time)
-
     def process_signal(self, msg):
         match msg.action:
             case SignalActions.LOG:
@@ -46,17 +58,31 @@ class Logger(Node):
             case _:
                 raise ValueError(f'{self.name:} I dont know what to do with this message')
 
+    def log(self, data: deque, model):
+        while data:
+            (state, output, time) = data.popleft()
+            self.logs[model].append(state, output, time)
+
     def listen_to(self, model: Model):
         self.link_to(model.get_address())
         model.logger = self
         n = ceil((model.tf - model.t0) * model.frequency + 1)
-        self.logs[model.get_address()] = Log(n)
+        self.logs[model.get_address()] = NumericLog(n)
 
-    def plot_state(self):
-        # assuming state is a numpy array...
-        for log in self.logs.values():
-            state_trajectory = concatenate(log.state, axis=1)
-            plot_trajectory(state_trajectory, log.time, 'x')
+    def get_logs(self):
+        return self.logs
+
+    def view(self):
+        n_plots = 1
+        fig, ax = plt.subplots(n_plots, 1) 
+        
+        for lg in self.logs.values():
+            state = concatenate(lg.output, axis=1)
+            scatter_on_ax(ax, lg.time, state[0], 
+                ylabel='', xlabel='Time [s]')
+
+        fig.patch.set_facecolor('lightgray')
+        plt.show()
 
     def finishing(self):
         pass

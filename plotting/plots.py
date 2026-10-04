@@ -52,3 +52,19 @@ def plot_on_ax(ax: plt.Axes,
     ax.minorticks_on()
     ax.tick_params(**cfg.ticks)
     ax.plot(x, y, color='blue', linewidth=cfg.linewidth)
+    return ax
+
+def scatter_on_ax(ax: matplotlib.axes.Axes, 
+    x: ndarray, y: ndarray, title: str = '', 
+    ylabel: str='', xlabel: str='') -> None:
+
+    cfg = PlotConfig()
+    ax.set_title(title, fontsize=cfg.title_fontsize)
+    ax.set_xlabel(xlabel, fontsize=cfg.label_fontsize)
+    ax.set_ylabel(ylabel, fontsize=cfg.label_fontsize)
+    ax.set_facecolor(cfg.facecolor)
+    ax.grid(**cfg.grid)
+    ax.minorticks_on()
+    ax.tick_params(**cfg.ticks)
+    ax.scatter(x, y, color='blue', linewidth=cfg.linewidth)
+    return ax
